@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "types": ["node"],
+    "outDir": "dist",
+    "module": "node20",
+    "skipLibCheck": true,
+  }
+}

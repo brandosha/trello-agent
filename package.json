@@ -1,0 +1,14 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@hono/node-server": "^2.0.2",
+    "@openai/codex-sdk": "^0.130.0",
+    "hono": "^4.12.19",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3"
+  }
+}
