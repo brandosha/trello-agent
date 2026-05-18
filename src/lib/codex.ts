@@ -6,6 +6,7 @@ import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@
 import { dataDir } from "./paths.js";
 import { PubSub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
+import { randomStr } from "./utils.js";
 
 
 const codexInterface = new Codex();
@@ -35,15 +36,6 @@ type SharedThreadEvent = (
   id: string;
   timestamp: Date
 };
-
-function generateEventId() {
-  const bytes = [
-    Math.floor(Math.random() * 256),
-    Math.floor(Math.random() * 256),
-    Math.floor(Math.random() * 256),
-  ]
-  return Buffer.from(bytes).toString("base64").replace(/=/g, "");
-}
 
 export class SharedThread {
   id: string;
@@ -119,7 +111,7 @@ export class SharedThread {
       from,
       input,
       options,
-      id: generateEventId(),
+      id: randomStr(8),
       timestamp: new Date(),
     });
 
@@ -131,7 +123,7 @@ export class SharedThread {
         from,
         input,
         options,
-        id: generateEventId(),
+        id: randomStr(8),
         timestamp: new Date(),
       };
       this._pubsub.publish(inputEvent);
@@ -142,7 +134,7 @@ export class SharedThread {
       for await (const event of events) {
         const sharedEvent: SharedThreadEvent = {
           ...event,
-          id: generateEventId(),
+          id: randomStr(8),
           timestamp: new Date(),
         };
         this._pubsub.publish(sharedEvent);

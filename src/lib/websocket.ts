@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { codex, SharedThreadClient } from "./codex.js";
 import { logger } from "./Logger.js";
+import { randomStr } from "./utils.js";
 
 const subscribeMessageSchema = z.object({
   type: z.literal("subscribe"),
@@ -27,6 +28,7 @@ const messageSchema = z.union([subscribeMessageSchema, abortMessageSchema, input
 export const websocketHandler = upgradeWebSocket(c => {
   const connInfo = getConnInfo(c);
   const ip = connInfo.remote.address;
+  const clientId = `${ip}-${randomStr(8)}`;
   logger.log(`New WebSocket connection from: ${ip}`);
 
   const codexClients = new Map<string, SharedThreadClient>();
