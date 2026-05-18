@@ -92,13 +92,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   function classifyEvent(message) {
     const payload = getEventPayload(message);
     const type = payload?.type || message?.type || 'event';
+    const itemStatus = payload?.item?.status;
+    if (itemStatus === 'failed') {
+      return 'err';
+    }
     if (type.includes('error') || type.includes('failed') || type.includes('invalid')) {
       return 'err';
     }
     if (type.includes('warn') || type.includes('abort')) {
       return 'warn';
     }
-    if (type.includes('completed') || type.includes('started')) {
+    if (itemStatus === 'completed' || type.includes('completed') || type.includes('started')) {
       return 'ok';
     }
     return 'info';
@@ -106,7 +110,42 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function extractSummary(message) {
     const payload = getEventPayload(message);
+    if (payload?.type === 'input.prompt' || payload?.type === 'input.prompt.queued') {
+      const prompt = typeof payload.prompt === 'string'
+        ? payload.prompt
+        : JSON.stringify(payload.prompt);
+      return `Prompt: ${prompt}`;
+    }
+    if (payload?.type === 'input.abort') {
+      return `Abort requested by ${payload.from || 'unknown'}`;
+    }
+    if (payload?.type === 'turn.abort') {
+      return 'Turn aborted';
+    }
+    if (payload?.type === 'turn.error') {
+      const name = payload.error?.name || 'Error';
+      const messageText = payload.error?.message || 'Unknown error';
+      return `${name}: ${messageText}`;
+    }
+    if (payload?.type === 'thread.started') {
+      return `Thread started: ${payload.thread_id || payload.threadId || 'unknown'}`;
+    }
+    if (payload?.type === 'turn.started') {
+      return 'Turn started';
+    }
+    if (payload?.type === 'turn.completed' && payload?.usage) {
+      const usage = payload.usage;
+      return `Turn completed (in ${usage.input_tokens}, out ${usage.output_tokens})`;
+    }
     if (payload?.item?.text) return payload.item.text;
+    if (payload?.item?.type === 'command_execution') {
+      const status = payload.item.status || 'unknown';
+      return `${status}: ${payload.item.command}`;
+    }
+    if (payload?.item?.type) {
+      const status = payload.item.status ? ` (${payload.item.status})` : '';
+      return `${payload.item.type}${status}`;
+    }
     if (payload?.message) return payload.message;
     if (payload?.input) return payload.input;
     if (typeof payload?.type === 'string') return payload.type;
@@ -135,6 +174,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       `ID: ${payload?.id || message?.id || '--'}`,
       `Thread: ${message?.threadId || message?.thread_id || payload?.threadId || payload?.thread_id || '--'}`,
     ];
+    if (payload?.item?.type) {
+      const status = payload.item.status ? ` (${payload.item.status})` : '';
+      metaLines.push(`Item: ${payload.item.type}${status}`);
+    }
     meta.innerHTML = metaLines.map(line => `<div>${line}</div>`).join('');
 
     const body = document.createElement('div');
@@ -147,12 +190,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     summary.style.margin = '6px 0 8px';
     summary.style.whiteSpace = 'pre-wrap';
 
-    const pre = document.createElement('pre');
-    pre.textContent = JSON.stringify(payload || message, null, 2);
-
     body.appendChild(typeEl);
     body.appendChild(summary);
-    body.appendChild(pre);
 
     element.appendChild(meta);
     element.appendChild(body);
@@ -211,7 +250,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       typeSet.add(payload.type);
       rebuildFilterOptions();
     }
-    if (payload?.type === 'prompt') inputCount += 1;
+    if (payload?.type === 'input.prompt') inputCount += 1;
     if (classifyEvent(message) === 'err') errorCount += 1;
     appendEvent(message);
     applyFilters();
