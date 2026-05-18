@@ -8,13 +8,9 @@ export class PubSub<EventType> {
   }
 
   subscribe(callback: (event: EventType) => void) {
-    let index = this._subs.length;
     this._subs.push(callback);
     return () => {
-      if (index !== -1) {
-        this._subs.splice(index, 1);
-        index = -1;
-      }
+      this._subs = this._subs.filter((cb) => cb !== callback);
     };
   }
 }

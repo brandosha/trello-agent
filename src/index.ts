@@ -7,25 +7,12 @@ import { join } from "path";
 
 import { config } from "../config.js";
 import { rootDir } from "./lib/paths.js";
+import { websocketHandler } from "./lib/websocket.js";
 
 
 const app = new Hono();
 
-app.get("/ws/:id", upgradeWebSocket(c => ({
-  onOpen: (event, ws) => {
-    const id = c.req.param("id");
-    console.log(`WebSocket connection opened for ID: ${id}`);
-    ws.send("Welcome to the WebSocket server!");
-    
-  },
-  onMessage: (event, ws) => {
-    console.log("Received message:", event.data);
-    ws.send(`Echo: ${event.data}`);
-  },
-  onClose: (event, ws) => {
-    console.log(`WebSocket connection closed: ${event.code} - ${event.reason}`);
-  },
-})));
+app.get("/ws", websocketHandler);
 
 app.use("/assets/*", serveStatic({ root: join(rootDir, "public") }));
 app.use("*", serveStatic({ path: join(rootDir, "public/index.html") }));

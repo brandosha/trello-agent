@@ -4,7 +4,8 @@ import fs from "fs/promises";
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
 import { dataDir } from "./paths.js";
-import { PubSub } from "./PubSub.js";
+import { PubSub, Unsubscribe } from "./PubSub.js";
+import { Logger } from "./Logger.js";
 
 
 const codexInterface = new Codex();
@@ -30,9 +31,21 @@ interface InputEvent {
 
 type SharedThreadEvent = (
   ThreadEvent | InputQueuedEvent | InputEvent
-) & { timestamp: Date };
+) & {
+  id: string;
+  timestamp: Date
+};
 
-class SharedThread extends PubSub<ThreadEvent> {
+function generateEventId() {
+  const bytes = [
+    Math.floor(Math.random() * 256),
+    Math.floor(Math.random() * 256),
+    Math.floor(Math.random() * 256),
+  ]
+  return Buffer.from(bytes).toString("base64").replace(/=/g, "");
+}
+
+export class SharedThread {
   id: string;
 
   private _filePath: string;
@@ -40,18 +53,24 @@ class SharedThread extends PubSub<ThreadEvent> {
   private _threadQueue: Promise<Thread>;
   private _fileAppendQueue: Promise<fs.FileHandle>;
   private _abortController = new AbortController();
+  private _logAppendQueue: Promise<fs.FileHandle>;
+  private _logger = new Logger();
+  private _logUnsubscribe: Unsubscribe;
+  private _pubsub = new PubSub<SharedThreadEvent>();
 
   constructor(id: string, options?: ThreadOptions) {
-    super();
-
-    if (!/[a-zA-Z0-9\_\-]/.test(id)) {
+    if (!/^[a-zA-Z0-9\_\-]+$/.test(id)) {
       throw new Error("Invalid thread ID");
     }
 
     this.id = id;
-    this._filePath = `${threadsDir}/${id}.jsonl`;
+
+    const threadDir = `${threadsDir}/${id}`;
+    const mkdir = fs.mkdir(threadDir, { recursive: true });
+
+    this._filePath = `${threadDir}/thread.jsonl`;
     this._fileAppendQueue = fs.open(this._filePath, "a");
-    this._thread = fs.open(this._filePath, "r")
+    this._thread = mkdir.then(() => fs.open(this._filePath, "r"))
       .then(async handle => {
         for await (const line of handle.readLines()) {
           const startEvent = JSON.parse(line) as ThreadEvent;
@@ -69,8 +88,15 @@ class SharedThread extends PubSub<ThreadEvent> {
         }
         throw err;
       });
-
     this._threadQueue = this._thread;
+
+    this._logAppendQueue = mkdir.then(() => fs.open(`${threadDir}/log.jsonl`, "a"));
+    this._logUnsubscribe = this._logger.subscribe(message => {
+      this._logAppendQueue = this._logAppendQueue.then(async handle => {
+        await handle.appendFile(JSON.stringify(message) + "\n");
+        return handle;
+      });
+    });
   }
 
   async isNew() {
@@ -88,22 +114,39 @@ class SharedThread extends PubSub<ThreadEvent> {
   }
 
   queueInput(input: Input, from: string, options: TurnOptions = {}) {
+    this._pubsub.publish({
+      type: "input.queued",
+      from,
+      input,
+      options,
+      id: generateEventId(),
+      timestamp: new Date(),
+    });
+
+    this._logger.log(`Queued input from ${from}: ${JSON.stringify(input)}`, "info");
+
     const promise = this._threadQueue.then(async (thread) => {
-      this.recordEvent({
+      const inputEvent: SharedThreadEvent = {
         type: "input",
         from,
         input,
         options,
+        id: generateEventId(),
         timestamp: new Date(),
-      });
+      };
+      this._pubsub.publish(inputEvent);
+      this.recordEvent(inputEvent);
+
       options.signal = this._abortController.signal;
       const { events } = await thread.runStreamed(input, options);
       for await (const event of events) {
-        this.publish(event);
-        this.recordEvent({
+        const sharedEvent: SharedThreadEvent = {
           ...event,
+          id: generateEventId(),
           timestamp: new Date(),
-        });
+        };
+        this._pubsub.publish(sharedEvent);
+        this.recordEvent(sharedEvent);
       }
       return thread;
     });
@@ -135,13 +178,53 @@ class SharedThread extends PubSub<ThreadEvent> {
       }
     }
   }
+
+  newClient(clientId: string) {
+    this._logger.log(`New client ${clientId}`, "info");
+    return new SharedThreadClient(clientId, this);
+  }
+
+  destroy() {
+    this._abortController.abort();
+    this._logUnsubscribe();
+    this._logAppendQueue.then(handle => handle.close());
+    this._fileAppendQueue.then(handle => handle.close());
+  }
+}
+
+export class SharedThreadClient {
+  clientId: string;
+  thread: SharedThread;
+
+  private _unsubscribers: Unsubscribe[] = [];
+
+  constructor(clientId: string, thread: SharedThread) {
+    this.clientId = clientId;
+    this.thread = thread;
+  }
+
+  queueInput(input: Input, options: TurnOptions = {}) {
+    this.thread.queueInput(input, this.clientId, options);
+  }
+
+  subscribe(callback: (event: SharedThreadEvent) => void) {
+    // @ts-ignore - _pubsub is private but we need to subscribe to it
+    const unsubscribe = this.thread._pubsub.subscribe(callback);
+    this._unsubscribers.push(unsubscribe);
+    return unsubscribe;
+  }
+
+  destroy() {
+    this._unsubscribers.forEach(unsub => unsub());
+    this._unsubscribers = [];
+  }
 }
 
 class CodexSharedThreads {
   private threads: Map<string, SharedThread> = new Map();
 
   threadExists(id: string) {
-    return existsSync(`${threadsDir}/${id}.jsonl`);
+    return existsSync(`${threadsDir}/${id}/thread.jsonl`);
   }
 
   thread(id: string, options?: ThreadOptions) {
