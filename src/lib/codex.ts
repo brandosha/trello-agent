@@ -82,7 +82,7 @@ export class SharedThread {
     const mkdir = fs.mkdir(threadDir, { recursive: true });
 
     this._filePath = `${threadDir}/thread.jsonl`;
-    this._fileAppendQueue = fs.open(this._filePath, "a");
+    this._fileAppendQueue = mkdir.then(() => fs.open(this._filePath, "a"));
     this._thread = mkdir.then(() => fs.open(this._filePath, "r"))
       .then(async handle => {
         for await (const line of handle.readLines()) {
@@ -215,10 +215,7 @@ export class SharedThread {
   }
 
   async *pastEvents() {
-    // await this._thread; // Ensure thread is initialized before reading events
-    if (await this.isNew()) {
-      return; // No past events for new threads
-    }
+    await this._thread; // Ensure thread is initialized before reading events
 
     const handle = await fs.open(this._filePath, "r");
     for await (const line of handle.readLines()) {

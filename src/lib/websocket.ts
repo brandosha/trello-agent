@@ -52,6 +52,14 @@ export const websocketHandler = upgradeWebSocket(c => {
             return;
           }
 
+          if (!codex.threadExists(threadId)) {
+            ws.send(JSON.stringify({
+              type: "error",
+              error: `Thread ${threadId} does not exist`
+            }));
+            return;
+          }
+
           const thread = codex.thread(message.threadId);
           const client = thread.newClient(clientId ?? "unknown");
           codexClients.set(threadId, client);
