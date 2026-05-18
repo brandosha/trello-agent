@@ -16,13 +16,13 @@ const abortMessageSchema = z.object({
   threadId: z.string(),
 });
 
-const inputMessageSchema = z.object({
+const promptMessageSchema = z.object({
   type: z.literal("prompt"),
   threadId: z.string(),
-  input: z.string(),
+  prompt: z.string(),
 });
 
-const messageSchema = z.union([subscribeMessageSchema, abortMessageSchema, inputMessageSchema]);
+const messageSchema = z.union([subscribeMessageSchema, abortMessageSchema, promptMessageSchema]);
 
 
 export const websocketHandler = upgradeWebSocket(c => {
@@ -83,7 +83,7 @@ export const websocketHandler = upgradeWebSocket(c => {
           }
           client.sendAbortSignal();
         } else if (message.type === "prompt") {
-          const { threadId, input } = message;
+          const { threadId, prompt } = message;
           const client = codexClients.get(threadId);
           if (!client) {
             ws.send(JSON.stringify({
@@ -92,13 +92,13 @@ export const websocketHandler = upgradeWebSocket(c => {
             }));
             return;
           }
-          client.sendPrompt(input);
+          client.sendPrompt(prompt);
         }
       } catch (err) {
         logger.warn(`Received invalid message from ${clientId}`);
         ws.send(JSON.stringify({
           type: "error",
-          error: "Invalid message format. Expected JSON."
+          error: "Invalid message format."
         }));
         return;
       }

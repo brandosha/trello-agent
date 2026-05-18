@@ -215,6 +215,11 @@ export class SharedThread {
   }
 
   async *pastEvents() {
+    // await this._thread; // Ensure thread is initialized before reading events
+    if (await this.isNew()) {
+      return; // No past events for new threads
+    }
+
     const handle = await fs.open(this._filePath, "r");
     for await (const line of handle.readLines()) {
       try {
@@ -227,7 +232,7 @@ export class SharedThread {
   }
 
   newClient(clientId: string) {
-    this._logger.log(`New client ${clientId}`, "info");
+    this._logger.log(`New client: ${clientId}`);
     return new SharedThreadClient(clientId, this);
   }
 

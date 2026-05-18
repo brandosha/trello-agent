@@ -11,8 +11,8 @@ function initializeWebSocket() {
         callbacks[threadId].push(callback);
         websocket.send(JSON.stringify({ type: 'subscribe', threadId }));
       },
-      sendInput: (threadId, input) => {
-        websocket.send(JSON.stringify({ type: 'input', threadId, input }));
+      sendPrompt: (threadId, prompt) => {
+        websocket.send(JSON.stringify({ type: 'prompt', threadId, prompt }));
       },
       abort: (threadId) => {
         websocket.send(JSON.stringify({ type: 'abort', threadId }));
@@ -211,7 +211,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       typeSet.add(payload.type);
       rebuildFilterOptions();
     }
-    if (payload?.type === 'input') inputCount += 1;
+    if (payload?.type === 'prompt') inputCount += 1;
     if (classifyEvent(message) === 'err') errorCount += 1;
     appendEvent(message);
     applyFilters();
@@ -224,7 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     event.preventDefault();
     const input = inputField.value.trim();
     if (!input) return;
-    api.sendInput(threadId, input);
+    api.sendPrompt(threadId, input);
     inputField.value = '';
     inputField.focus();
   });
