@@ -16,26 +16,47 @@ if (!existsSync(threadsDir)) {
   mkdirSync(threadsDir, { recursive: true });
 }
 
-interface InputQueuedEvent {
-  type: "input.queued";
+interface PromptQueuedEvent {
+  type: "input.prompt.queued";
   from: string;
-  input: Input;
+  prompt: Input;
   options: TurnOptions;
 }
 
-interface InputEvent {
-  type: "input";
+interface PromptEvent {
+  type: "input.prompt";
   from: string;
-  input: Input;
+  prompt: Input;
   options: TurnOptions;
+}
+
+interface AbortEvent {
+  type: "input.abort";
+  from: string;
+}
+
+interface TurnAbortEvent {
+  type: "turn.abort";
+}
+
+interface TurnErrorEvent {
+  type: "turn.error";
+  error: {
+    name: string;
+    message: string;
+  }
 }
 
 type SharedThreadEvent = (
-  ThreadEvent | InputQueuedEvent | InputEvent
+  ThreadEvent | PromptQueuedEvent | PromptEvent | AbortEvent | TurnAbortEvent | TurnErrorEvent
 ) & {
   id: string;
   timestamp: Date
 };
+
+function generateEventId() {
+  return randomStr(5);
+}
 
 export class SharedThread {
   id: string;
@@ -105,47 +126,81 @@ export class SharedThread {
     }
   }
 
-  queueInput(input: Input, from: string, options: TurnOptions = {}) {
+  private queueInput(prompt: Input, from: string, options: TurnOptions = {}) {
     this._pubsub.publish({
-      type: "input.queued",
+      type: "input.prompt.queued",
       from,
-      input,
+      prompt,
       options,
-      id: randomStr(8),
+      id: generateEventId(),
       timestamp: new Date(),
     });
 
-    this._logger.log(`Queued input from ${from}: ${JSON.stringify(input)}`, "info");
+    this._logger.log(`Queued input from ${from}: ${JSON.stringify(prompt)}`, "info");
 
     const promise = this._threadQueue.then(async (thread) => {
       const inputEvent: SharedThreadEvent = {
-        type: "input",
+        type: "input.prompt",
         from,
-        input,
+        prompt,
         options,
-        id: randomStr(8),
+        id: generateEventId(),
         timestamp: new Date(),
       };
       this._pubsub.publish(inputEvent);
       this.recordEvent(inputEvent);
 
       options.signal = this._abortController.signal;
-      const { events } = await thread.runStreamed(input, options);
-      for await (const event of events) {
-        const sharedEvent: SharedThreadEvent = {
-          ...event,
-          id: randomStr(8),
-          timestamp: new Date(),
-        };
-        this._pubsub.publish(sharedEvent);
-        this.recordEvent(sharedEvent);
+      try {
+        const { events } = await thread.runStreamed(prompt, options);
+        for await (const event of events) {
+          const sharedEvent: SharedThreadEvent = {
+            ...event,
+            id: generateEventId(),
+            timestamp: new Date(),
+          };
+          this._pubsub.publish(sharedEvent);
+          this.recordEvent(sharedEvent);
+        }
+      } catch (err: any) {
+        if (err.name === "AbortError") {
+          const abortEvent: SharedThreadEvent = {
+            type: "turn.abort",
+            id: generateEventId(),
+            timestamp: new Date(),
+          };
+          this._pubsub.publish(abortEvent);
+          this.recordEvent(abortEvent);
+        } else {
+          const errorEvent: SharedThreadEvent = {
+            type: "turn.error",
+            error: {
+              name: err.name,
+              message: err.message,
+            },
+            id: generateEventId(),
+            timestamp: new Date(),
+          };
+          this._pubsub.publish(errorEvent);
+          this.recordEvent(errorEvent);
+        }
       }
+      
       return thread;
     });
     this._threadQueue = promise;
   }
 
-  async abort() {
+  private async abort(from: string) {
+    const abortEvent: SharedThreadEvent = {
+      type: "input.abort",
+      id: generateEventId(),
+      timestamp: new Date(),
+      from,
+    };
+    this._pubsub.publish(abortEvent);
+    await this.recordEvent(abortEvent);
+    
     this._abortController.abort();
     this._abortController = new AbortController();
   }
@@ -195,8 +250,14 @@ export class SharedThreadClient {
     this.thread = thread;
   }
 
-  queueInput(input: Input, options: TurnOptions = {}) {
+  sendPrompt(input: Input, options: TurnOptions = {}) {
+    // @ts-ignore - accessing private method
     this.thread.queueInput(input, this.clientId, options);
+  }
+
+  sendAbortSignal() {
+    // @ts-ignore - accessing private method
+    this.thread.abort(this.clientId);
   }
 
   subscribe(callback: (event: SharedThreadEvent) => void) {

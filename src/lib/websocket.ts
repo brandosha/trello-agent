@@ -17,7 +17,7 @@ const abortMessageSchema = z.object({
 });
 
 const inputMessageSchema = z.object({
-  type: z.literal("input"),
+  type: z.literal("prompt"),
   threadId: z.string(),
   input: z.string(),
 });
@@ -28,14 +28,14 @@ const messageSchema = z.union([subscribeMessageSchema, abortMessageSchema, input
 export const websocketHandler = upgradeWebSocket(c => {
   const connInfo = getConnInfo(c);
   const ip = connInfo.remote.address;
-  const clientId = `${ip}-${randomStr(8)}`;
-  logger.log(`New WebSocket connection from: ${ip}`);
+  const clientId = `${randomStr(8)} (${ip})`;
+  logger.log(`New WebSocket connection from: ${clientId}`);
 
   const codexClients = new Map<string, SharedThreadClient>();
 
   return {
     onOpen: (event, ws) => {
-      logger.log(`WebSocket connection opened for: ${ip}`);
+      logger.log(`WebSocket connection opened for: ${clientId}`);
     },
     onMessage: async (event, ws) => {
       try {
@@ -53,7 +53,7 @@ export const websocketHandler = upgradeWebSocket(c => {
           }
 
           const thread = codex.thread(message.threadId);
-          const client = thread.newClient(ip ?? "unknown");
+          const client = thread.newClient(clientId ?? "unknown");
           codexClients.set(threadId, client);
 
           client.subscribe(event => {
@@ -81,8 +81,8 @@ export const websocketHandler = upgradeWebSocket(c => {
             }));
             return;
           }
-          client.thread.abort();
-        } else if (message.type === "input") {
+          client.sendAbortSignal();
+        } else if (message.type === "prompt") {
           const { threadId, input } = message;
           const client = codexClients.get(threadId);
           if (!client) {
@@ -92,10 +92,10 @@ export const websocketHandler = upgradeWebSocket(c => {
             }));
             return;
           }
-          client.queueInput(input);
+          client.sendPrompt(input);
         }
       } catch (err) {
-        logger.warn(`Received invalid message from ${ip}`);
+        logger.warn(`Received invalid message from ${clientId}`);
         ws.send(JSON.stringify({
           type: "error",
           error: "Invalid message format. Expected JSON."
@@ -104,7 +104,7 @@ export const websocketHandler = upgradeWebSocket(c => {
       }
     },
     onClose: (event, ws) => {
-      logger.log(`WebSocket connection closed for: ${ip}`);
+      logger.log(`WebSocket connection closed for: ${clientId}`);
     },
   }
 });
