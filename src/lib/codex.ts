@@ -278,8 +278,13 @@ export class SharedThreadClient {
 class CodexSharedThreads {
   private threads: Map<string, SharedThread> = new Map();
 
-  threadExists(id: string) {
-    return existsSync(`${threadsDir}/${id}/thread.jsonl`);
+  async threadExists(id: string) {
+    try {
+      await fs.access(`${threadsDir}/${id}/thread.jsonl`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   thread(id: string, options?: ThreadOptions) {

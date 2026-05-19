@@ -52,7 +52,9 @@ export const websocketHandler = upgradeWebSocket(c => {
             return;
           }
 
-          if (!codex.threadExists(threadId)) {
+          const exists = await codex.threadExists(threadId);
+          if (!exists) {
+            logger.warn(`Client ${clientId} attempted to subscribe to non-existent thread: ${threadId}`);
             ws.send(JSON.stringify({
               type: "error",
               error: `Thread ${threadId} does not exist`
