@@ -6,4 +6,3 @@ config.ts
 .env
 
 data/
-workspaces/
