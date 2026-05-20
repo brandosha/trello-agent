@@ -1,0 +1,27 @@
+<template id="console-template">
+  <div class="console">
+    <header>
+      <div class="title">
+        Remote Agent
+        <small>Choose a thread</small>
+      </div>
+    </header>
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-header">
+          <div>Open a thread URL to view events.</div>
+        </div>
+        <div class="panel-body">
+          <div class="badge">Example: /test-thread</div>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>
+<script>
+  function Console() {
+    return {
+      $template: '#console-template',
+    };
+  }
+</script>

@@ -127,6 +127,11 @@ header {
   color: var(--accent);
 }
 
+.event-summary {
+  margin: 6px 0 8px;
+  white-space: pre-wrap;
+}
+
 .event.ok .type { color: var(--ok); }
 .event.warn .type { color: var(--warn); }
 .event.err .type { color: var(--err); }

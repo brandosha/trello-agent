@@ -59,233 +59,42 @@ function initializeWebSocket() {
   });
 }
 
+// UI is handled by petite-vue components.
+
+async function importComponent(path) {
+  const content = await fetch(`/assets/components/${path}.html`).then(res => res.text());
+  const dom = new DOMParser().parseFromString(content, 'text/html');
+  console.log(`Importing component: ${path}`, dom);
+  
+  const template = dom.getElementsByTagName('template')[0];
+  if (template) {
+    document.body.appendChild(document.importNode(template, true));
+  }
+
+  const script = dom.scripts[0];
+  if (script) {
+    const scriptCopy = document.createElement('script');
+    scriptCopy.textContent = script.textContent;
+    document.body.appendChild(scriptCopy);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  await Promise.all([
+    'Router',
+    'Console',
+    'Thread',
+  ].map(importComponent));
+
   const api = await initializeWebSocket();
-  window.api = api; // Expose API for debugging
 
-  const threadId = location.pathname.slice(1); // Get thread ID from URL path
-  const threadLabel = document.getElementById('thread-id');
-  threadLabel.textContent = `Thread: ${threadId || '(none)'}`;
+  const app = PetiteVue.reactive({
+    route: '',
+    api,
+  })
+  window.app = app; // Expose app for debugging
 
-  const threadContainer = document.getElementById('thread-events');
-  const filterText = document.getElementById('filter-text');
-  const filterType = document.getElementById('filter-type');
-  const autoscroll = document.getElementById('autoscroll');
-  const connectionStatus = document.getElementById('connection-status');
-  const statTotal = document.getElementById('stat-total');
-  const statLast = document.getElementById('stat-last');
-  const statInputs = document.getElementById('stat-inputs');
-  const statErrors = document.getElementById('stat-errors');
+  app.route = location.pathname;
 
-  const events = [];
-  const typeSet = new Set();
-  let inputCount = 0;
-  let errorCount = 0;
-
-  function getEventPayload(message) {
-    if (message && message.type === 'thread.event' && message.event) {
-      return message.event;
-    }
-    return message;
-  }
-
-  function classifyEvent(message) {
-    const payload = getEventPayload(message);
-    const type = payload?.type || message?.type || 'event';
-    const itemStatus = payload?.item?.status;
-    if (itemStatus === 'failed') {
-      return 'err';
-    }
-    if (type.includes('error') || type.includes('failed') || type.includes('invalid')) {
-      return 'err';
-    }
-    if (type.includes('warn') || type.includes('abort')) {
-      return 'warn';
-    }
-    if (itemStatus === 'completed' || type.includes('completed') || type.includes('started')) {
-      return 'ok';
-    }
-    return 'info';
-  }
-
-  function extractSummary(message) {
-    const payload = getEventPayload(message);
-    if (payload?.type === 'input.prompt' || payload?.type === 'input.prompt.queued') {
-      const prompt = typeof payload.prompt === 'string'
-        ? payload.prompt
-        : JSON.stringify(payload.prompt);
-      return `Prompt: ${prompt}`;
-    }
-    if (payload?.type === 'input.abort') {
-      return `Abort requested by ${payload.from || 'unknown'}`;
-    }
-    if (payload?.type === 'turn.abort') {
-      return 'Turn aborted';
-    }
-    if (payload?.type === 'turn.error') {
-      const name = payload.error?.name || 'Error';
-      const messageText = payload.error?.message || 'Unknown error';
-      return `${name}: ${messageText}`;
-    }
-    if (payload?.type === 'thread.started') {
-      return `Thread started: ${payload.thread_id || payload.threadId || 'unknown'}`;
-    }
-    if (payload?.type === 'turn.started') {
-      return 'Turn started';
-    }
-    if (payload?.type === 'turn.completed' && payload?.usage) {
-      const usage = payload.usage;
-      return `Turn completed (in ${usage.input_tokens}, out ${usage.output_tokens})`;
-    }
-    if (payload?.item?.text) return payload.item.text;
-    if (payload?.item?.type === 'command_execution') {
-      const status = payload.item.status || 'unknown';
-      return `${status}: ${payload.item.command}`;
-    }
-    if (payload?.item?.type) {
-      const status = payload.item.status ? ` (${payload.item.status})` : '';
-      return `${payload.item.type}${status}`;
-    }
-    if (payload?.message) return payload.message;
-    if (payload?.input) return payload.input;
-    if (typeof payload?.type === 'string') return payload.type;
-    if (typeof message?.type === 'string') return message.type;
-    return 'Event received';
-  }
-
-  function formatTimestamp(value) {
-    if (!value) return '--';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return date.toLocaleTimeString();
-  }
-
-  function renderEvent(message) {
-    const payload = getEventPayload(message);
-    const type = payload?.type || message?.type || 'event';
-    const tone = classifyEvent(message);
-    const element = document.createElement('div');
-    element.className = `event ${tone}`;
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const metaLines = [
-      `Time: ${formatTimestamp(payload?.timestamp || message?.timestamp)}`,
-      `ID: ${payload?.id || message?.id || '--'}`,
-      `Thread: ${message?.threadId || message?.thread_id || payload?.threadId || payload?.thread_id || '--'}`,
-    ];
-    if (payload?.item?.type) {
-      const status = payload.item.status ? ` (${payload.item.status})` : '';
-      metaLines.push(`Item: ${payload.item.type}${status}`);
-    }
-    meta.innerHTML = metaLines.map(line => `<div>${line}</div>`).join('');
-
-    const body = document.createElement('div');
-    const typeEl = document.createElement('div');
-    typeEl.className = 'type';
-    typeEl.textContent = type;
-
-    const summary = document.createElement('div');
-    summary.textContent = extractSummary(message);
-    summary.style.margin = '6px 0 8px';
-    summary.style.whiteSpace = 'pre-wrap';
-
-    body.appendChild(typeEl);
-    body.appendChild(summary);
-
-    element.appendChild(meta);
-    element.appendChild(body);
-    return element;
-  }
-
-  function updateStats(lastEvent) {
-    statTotal.textContent = String(events.length);
-    const payload = lastEvent ? getEventPayload(lastEvent) : null;
-    statLast.textContent = payload ? formatTimestamp(payload.timestamp) : '--';
-    statInputs.textContent = String(inputCount);
-    statErrors.textContent = String(errorCount);
-  }
-
-  function rebuildFilterOptions() {
-    const current = filterType.value;
-    filterType.innerHTML = '<option value="">All types</option>';
-    Array.from(typeSet).sort().forEach((type) => {
-      const option = document.createElement('option');
-      option.value = type;
-      option.textContent = type;
-      filterType.appendChild(option);
-    });
-    filterType.value = current;
-  }
-
-  function applyFilters() {
-    const text = filterText.value.trim().toLowerCase();
-    const type = filterType.value;
-    Array.from(threadContainer.children).forEach((node) => {
-      const dataText = node.getAttribute('data-search') || '';
-      const eventType = node.getAttribute('data-type') || '';
-      const matchesText = !text || dataText.includes(text);
-      const matchesType = !type || eventType === type;
-      node.style.display = matchesText && matchesType ? '' : 'none';
-    });
-  }
-
-  function appendEvent(message) {
-    const payload = getEventPayload(message);
-    const type = payload?.type || message?.type || 'event';
-    const element = renderEvent(message);
-    element.setAttribute('data-type', type);
-    element.setAttribute('data-search', JSON.stringify(payload || message).toLowerCase());
-    threadContainer.appendChild(element);
-    if (autoscroll.checked) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }
-
-  api.subscribe(threadId, (message) => {
-    console.log('Received thread update:', message);
-    const payload = getEventPayload(message);
-    events.push(message);
-    if (payload?.type) {
-      typeSet.add(payload.type);
-      rebuildFilterOptions();
-    }
-    if (payload?.type === 'input.prompt') inputCount += 1;
-    if (classifyEvent(message) === 'err') errorCount += 1;
-    appendEvent(message);
-    applyFilters();
-    updateStats(message);
-  });
-
-  const inputForm = document.getElementById('input-form');
-  const inputField = document.getElementById('input-field');
-  inputForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const input = inputField.value.trim();
-    if (!input) return;
-    api.sendPrompt(threadId, input);
-    inputField.value = '';
-    inputField.focus();
-  });
-
-  const abortButton = document.getElementById('abort-button');
-  abortButton.addEventListener('click', () => {
-    api.abort(threadId);
-  });
-
-  filterText.addEventListener('input', applyFilters);
-  filterType.addEventListener('change', applyFilters);
-
-  api.onOpen(() => {
-    connectionStatus.textContent = 'Connected';
-    connectionStatus.style.color = 'var(--ok)';
-  });
-  api.onClose(() => {
-    connectionStatus.textContent = 'Disconnected';
-    connectionStatus.style.color = 'var(--warn)';
-  });
-  api.onError(() => {
-    connectionStatus.textContent = 'Error';
-    connectionStatus.style.color = 'var(--err)';
-  });
+  PetiteVue.createApp({ app }).mount();
 });
