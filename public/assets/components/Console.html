@@ -1,18 +1,61 @@
 <template id="console-template">
-  <div class="console">
+  <div class="console" @vue:mounted="mounted">
     <header>
       <div class="title">
         Remote Agent
-        <small>Choose a thread</small>
+        <small>Trello setup & access</small>
       </div>
     </header>
     <div class="layout">
       <section class="panel">
         <div class="panel-header">
-          <div>Open a thread URL to view events.</div>
+          <div v-if="!configured">Configure Trello</div>
+          <div v-else>Authorize Trello</div>
         </div>
         <div class="panel-body">
-          <div class="badge">Example: /test-thread</div>
+          <div v-if="!configured" class="stack">
+            <div>
+              <div class="label">Trello API Key</div>
+              <input v-model="apiKeyInput" type="text" class="input" placeholder="Paste Trello API key" />
+            </div>
+            <button class="btn primary" @click="startSetup">Authorize Trello</button>
+            <div v-if="statusMessage" class="badge">{{ statusMessage }}</div>
+            <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+          </div>
+          <div v-else class="stack">
+            <div class="badge" v-if="authorized">Authorized as {{ memberId || 'unknown' }}</div>
+            <div class="badge" v-else>Authorization required to view threads.</div>
+            <button v-if="!authorized" class="btn primary" @click="startAuth">Authorize Trello</button>
+            <div v-if="statusMessage" class="badge">{{ statusMessage }}</div>
+            <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+          </div>
+        </div>
+      </section>
+      <section v-if="isOwner" class="panel">
+        <div class="panel-header">User permissions</div>
+        <div class="panel-body stack">
+          <div>
+            <div class="label">Trello member ID</div>
+            <input v-model="permissionMemberId" type="text" class="input" placeholder="member id" />
+          </div>
+          <label class="badge">
+            <input type="checkbox" v-model="permissionView" />
+            View
+          </label>
+          <label class="badge">
+            <input type="checkbox" v-model="permissionEdit" />
+            Edit
+          </label>
+          <button class="btn primary" @click="savePermissions">Save permissions</button>
+          <div class="panel">
+            <div class="panel-header">Current permissions</div>
+            <div class="panel-body">
+              <div v-if="permissionEntries.length === 0" class="badge">No users yet.</div>
+              <div v-for="entry in permissionEntries" :key="entry.id" class="badge">
+                {{ entry.id }}: view={{ entry.view }}, edit={{ entry.edit }}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -22,6 +65,137 @@
   function Console() {
     return {
       $template: '#console-template',
+      api: null,
+      apiKeyInput: '',
+      statusMessage: '',
+      errorMessage: '',
+      permissionMemberId: '',
+      permissionView: false,
+      permissionEdit: false,
+      oauthRequested: false,
+      mounted() {
+        this.api = app.api;
+        if (!this.api) return;
+
+        this.api.onMessage((message) => this.handleMessage(message));
+        this.readTokenFromHash();
+        this.loadDraftApiKey();
+
+        if (app.trelloStatus.configured) {
+          this.ensureAuth();
+        }
+      },
+      get configured() {
+        return app.trelloStatus.configured;
+      },
+      get authorized() {
+        return app.trelloAuth.authorized;
+      },
+      get isOwner() {
+        return app.trelloAuth.owner;
+      },
+      get memberId() {
+        return app.trelloAuth.memberId;
+      },
+      get permissionEntries() {
+        const permissions = app.trelloPermissions || {};
+        return Object.entries(permissions).map(([id, perms]) => ({
+          id,
+          view: !!perms.view,
+          edit: !!perms.edit,
+        }));
+      },
+      handleMessage(message) {
+        if (message?.type === 'trello.status') {
+          if (message.configured) {
+            this.ensureAuth();
+          }
+        }
+        if (message?.type === 'trello.oauth.url') {
+          if (!message.url) return;
+          window.location.assign(message.url);
+        }
+        if (message?.type === 'trello.auth.status') {
+          if (message.owner) {
+            this.api.requestPermissions();
+          }
+        }
+        if (message?.type === 'error') {
+          this.errorMessage = message.error || 'Unknown error.';
+        }
+      },
+      loadDraftApiKey() {
+        const stored = window.localStorage.getItem('trelloAgentApiKeyDraft');
+        if (stored && !this.apiKeyInput) {
+          this.apiKeyInput = stored;
+        }
+      },
+      readTokenFromHash() {
+        if (!window.location.hash) return;
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        const token = params.get('token');
+        if (!token) return;
+        window.localStorage.setItem('trelloAgentTrelloToken', token);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        if (this.configured) {
+          this.api.sendTrelloAuth({ token });
+        } else {
+          const apiKey = this.apiKeyInput || window.localStorage.getItem('trelloAgentApiKeyDraft');
+          if (!apiKey) {
+            this.errorMessage = 'API key required to finish setup.';
+            return;
+          }
+          this.api.sendTrelloSetup({ apiKey, token });
+          window.localStorage.removeItem('trelloAgentApiKeyDraft');
+        }
+      },
+      ensureAuth() {
+        if (!this.configured || this.authorized) return;
+        const token = window.localStorage.getItem('trelloAgentTrelloToken');
+        if (token) {
+          this.api.sendTrelloAuth({ token });
+          return;
+        }
+        if (!this.oauthRequested) {
+          this.oauthRequested = true;
+          this.api.requestTrelloOAuth({ returnUrl: `${window.location.origin}${window.location.pathname}` });
+        }
+      },
+      startSetup() {
+        this.errorMessage = '';
+        if (!this.apiKeyInput) {
+          this.errorMessage = 'API key is required.';
+          return;
+        }
+        window.localStorage.setItem('trelloAgentApiKeyDraft', this.apiKeyInput);
+        const returnUrl = `${window.location.origin}${window.location.pathname}`;
+        const url = new URL('https://trello.com/1/authorize');
+        url.searchParams.set('expiration', 'never');
+        url.searchParams.set('name', 'trello-agent');
+        url.searchParams.set('scope', 'read,write,account');
+        url.searchParams.set('response_type', 'token');
+        url.searchParams.set('key', this.apiKeyInput);
+        url.searchParams.set('return_url', returnUrl);
+        window.location.assign(url.toString());
+      },
+      startAuth() {
+        this.errorMessage = '';
+        this.api.requestTrelloOAuth({ returnUrl: `${window.location.origin}${window.location.pathname}` });
+      },
+      savePermissions() {
+        this.errorMessage = '';
+        if (!this.permissionMemberId) {
+          this.errorMessage = 'Member id is required.';
+          return;
+        }
+        this.api.sendPermissionsUpdate({
+          memberId: this.permissionMemberId,
+          permissions: {
+            view: !!this.permissionView,
+            edit: !!this.permissionEdit,
+          },
+        });
+      },
     };
   }
 </script>

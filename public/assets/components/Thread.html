@@ -23,7 +23,8 @@
           </div>
         </div>
         <div class="panel-body">
-          <div class="events" ref="eventsContainer">
+          <div v-if="!authorized" class="badge">Trello authorization required to view this thread.</div>
+          <div v-else class="events" ref="eventsContainer">
             <div v-for="event in filteredEvents" :key="event.id" class="event" :class="event.tone">
               <div class="meta">
                 <div>Time: {{ event.timeLabel }}</div>
@@ -63,13 +64,13 @@
             </div>
           </div>
         </section>
-        <section class="panel">
+        <section class="panel" v-if="authorized">
           <div class="panel-header">Controls</div>
           <div class="panel-body">
             <form class="input-row" @submit.prevent="sendPrompt">
-              <input v-model="promptInput" type="text" placeholder="Send input to agent" />
-              <button type="submit" class="btn primary">Send</button>
-              <button type="button" class="btn danger" @click="sendAbort">Abort</button>
+              <input v-model="promptInput" type="text" placeholder="Send input to agent" :disabled="!canEdit" />
+              <button type="submit" class="btn primary" :disabled="!canEdit">Send</button>
+              <button type="button" class="btn danger" :disabled="!canEdit" @click="sendAbort">Abort</button>
             </form>
           </div>
         </section>
@@ -94,6 +95,8 @@
       inputCount: 0,
       errorCount: 0,
       promptInput: '',
+      oauthRequested: false,
+      subscribed: false,
       mounted() {
         this.threadId = location.pathname.slice(1);
         this.threadLabel = this.threadId || '(none)';
@@ -104,9 +107,22 @@
         this.api.onClose(() => this.setConnection('Disconnected', 'var(--warn)'));
         this.api.onError(() => this.setConnection('Error', 'var(--err)'));
 
-        this.api.subscribe(this.threadId, (message) => {
-          this.handleEvent(message);
-        });
+        this.api.onMessage((message) => this.handleMessage(message));
+        this.readTokenFromHash();
+
+        if (app.trelloStatus.configured) {
+          this.ensureAuth();
+        }
+
+        if (this.authorized) {
+          this.subscribeToThread();
+        }
+      },
+      get authorized() {
+        return app.trelloAuth.authorized;
+      },
+      get canEdit() {
+        return app.trelloAuth.permissions?.edit || app.trelloAuth.owner;
       },
       setConnection(status, color) {
         this.connectionStatus = status;
@@ -130,13 +146,59 @@
       },
       sendPrompt() {
         const input = this.promptInput.trim();
-        if (!input || !this.api) return;
+        if (!input || !this.api || !this.canEdit) return;
         this.api.sendPrompt(this.threadId, input);
         this.promptInput = '';
       },
       sendAbort() {
-        if (!this.api) return;
+        if (!this.api || !this.canEdit) return;
         this.api.abort(this.threadId);
+      },
+      handleMessage(message) {
+        if (message?.type === 'trello.status') {
+          if (message.configured) {
+            this.ensureAuth();
+          }
+        }
+        if (message?.type === 'trello.auth.status') {
+          if (message.authorized && !this.subscribed) {
+            this.subscribeToThread();
+          }
+        }
+        if (message?.type === 'trello.oauth.url') {
+          if (!message.url) return;
+          window.location.assign(message.url);
+        }
+      },
+      subscribeToThread() {
+        if (this.subscribed || !this.api) return;
+        this.subscribed = true;
+        this.api.subscribe(this.threadId, (message) => {
+          this.handleEvent(message);
+        });
+      },
+      readTokenFromHash() {
+        if (!window.location.hash) return;
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        const token = params.get('token');
+        if (!token) return;
+        window.localStorage.setItem('trelloAgentTrelloToken', token);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        if (app.trelloStatus.configured) {
+          this.api.sendTrelloAuth({ token });
+        }
+      },
+      ensureAuth() {
+        if (!app.trelloStatus.configured || this.authorized) return;
+        const token = window.localStorage.getItem('trelloAgentTrelloToken');
+        if (token) {
+          this.api.sendTrelloAuth({ token });
+          return;
+        }
+        if (!this.oauthRequested) {
+          this.oauthRequested = true;
+          this.api.requestTrelloOAuth({ returnUrl: `${window.location.origin}${window.location.pathname}` });
+        }
       },
       handleEvent(message) {
         const payload = this.getEventPayload(message);

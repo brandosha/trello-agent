@@ -7,6 +7,7 @@ import { dataDir } from "./paths.js";
 
 const execFile = promisify(cp.execFile);
 
+const reposDir = `${dataDir}/repos`;
 const workspacesDir = `${dataDir}/workspaces`;
 
 function sanitizeFilename(name: string) {
@@ -33,7 +34,7 @@ export function getRepoDir(repoLocation: string) {
   repoPath = sanitizeFilename(repoPath);
   const workspaceName = `${repoHost}_${repoPath}`;
 
-  return `${workspacesDir}/${workspaceName}`;
+  return `${reposDir}/${workspaceName}`;
 }
 
 export async function cloneRepo(repoLocation: string) {
@@ -60,7 +61,7 @@ export async function setupWorkspace({ repo, workspaceId, mainBranch }: SetupWor
     await cloneRepo(repo);
   }
 
-  const workspaceDir = `${repoDir}/${workspaceId}`;
+  const workspaceDir = `${workspacesDir}/${workspaceId}`;
   try {
     await fs.access(workspaceDir, fs.constants.F_OK);
     return workspaceDir; // Workspace already exists

@@ -93,6 +93,15 @@ header {
   padding: 6px 8px;
 }
 
+.input {
+  width: 100%;
+  background: #0c1016;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
 .events {
   display: flex;
   flex-direction: column;
