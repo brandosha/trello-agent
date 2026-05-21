@@ -1,11 +1,8 @@
-import cp from "child_process";
 import fs from "fs/promises";
-import { promisify } from "util";
 
 import { dataDir } from "./paths.js";
+import { execFile } from "./utils.js";
 
-
-const execFile = promisify(cp.execFile);
 
 const reposDir = `${dataDir}/repos`;
 const workspacesDir = `${dataDir}/workspaces`;

@@ -1,5 +1,6 @@
 import path from "path";
 import { existsSync } from "fs";
+import fs from "fs/promises";
 
 function getRootDir() {
   let currentDir = import.meta.dirname;
@@ -16,3 +17,6 @@ function getRootDir() {
 
 export const rootDir = getRootDir();
 export const dataDir = path.join(rootDir, "data");
+export const configDir = path.join(dataDir, "config");
+
+export const mkConfigDir = fs.mkdir(configDir, { recursive: true });

@@ -95,7 +95,6 @@
       inputCount: 0,
       errorCount: 0,
       promptInput: '',
-      oauthRequested: false,
       subscribed: false,
       mounted() {
         this.threadId = location.pathname.slice(1);
@@ -108,15 +107,8 @@
         this.api.onError(() => this.setConnection('Error', 'var(--err)'));
 
         this.api.onMessage((message) => this.handleMessage(message));
-        this.readTokenFromHash();
 
-        if (app.trelloStatus.configured) {
-          this.ensureAuth();
-        }
-
-        if (this.authorized) {
-          this.subscribeToThread();
-        }
+        this.subscribeToThread();
       },
       get authorized() {
         return app.trelloAuth.authorized;
@@ -155,20 +147,7 @@
         this.api.abort(this.threadId);
       },
       handleMessage(message) {
-        if (message?.type === 'trello.status') {
-          if (message.configured) {
-            this.ensureAuth();
-          }
-        }
-        if (message?.type === 'trello.auth.status') {
-          if (message.authorized && !this.subscribed) {
-            this.subscribeToThread();
-          }
-        }
-        if (message?.type === 'trello.oauth.url') {
-          if (!message.url) return;
-          window.location.assign(message.url);
-        }
+        
       },
       subscribeToThread() {
         if (this.subscribed || !this.api) return;
@@ -176,29 +155,6 @@
         this.api.subscribe(this.threadId, (message) => {
           this.handleEvent(message);
         });
-      },
-      readTokenFromHash() {
-        if (!window.location.hash) return;
-        const params = new URLSearchParams(window.location.hash.slice(1));
-        const token = params.get('token');
-        if (!token) return;
-        window.localStorage.setItem('trelloAgentTrelloToken', token);
-        window.history.replaceState({}, document.title, window.location.pathname);
-        if (app.trelloStatus.configured) {
-          this.api.sendTrelloAuth({ token });
-        }
-      },
-      ensureAuth() {
-        if (!app.trelloStatus.configured || this.authorized) return;
-        const token = window.localStorage.getItem('trelloAgentTrelloToken');
-        if (token) {
-          this.api.sendTrelloAuth({ token });
-          return;
-        }
-        if (!this.oauthRequested) {
-          this.oauthRequested = true;
-          this.api.requestTrelloOAuth({ returnUrl: `${window.location.origin}${window.location.pathname}` });
-        }
       },
       handleEvent(message) {
         const payload = this.getEventPayload(message);

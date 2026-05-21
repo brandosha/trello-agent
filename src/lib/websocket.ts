@@ -1,355 +1,386 @@
 import { upgradeWebSocket } from "@hono/node-server";
-import { getConnInfo } from '@hono/node-server/conninfo'
+import { WebSocket } from "ws";
 import { z } from "zod";
 
+import { generateAuthToken, verifyAuthToken } from "./auth.js";
 import { codex, SharedThreadClient } from "./codex.js";
 import { logger } from "./Logger.js";
-import { randomStr } from "./utils.js";
-import { readTrelloConfig, writeTrelloConfig } from "./trelloConfig.js";
-import { readPermissions, writePermissions } from "./permissionsConfig.js";
+import { trelloIsConfigured, getTrelloMember, setTrelloConfig, getTrelloApiKey } from "./trello.js";
+import { hasPermission, listPermissions, setPermissions, UserPermission } from "./permissions.js";
+import { WSContext } from "hono/ws";
 
-const subscribeMessageSchema = z.object({
-  type: z.literal("subscribe"),
-  threadId: z.string(),
-});
+interface ClientContext {
+  codexClients: Map<string, SharedThreadClient>;
+  email?: string;
+}
 
-const abortMessageSchema = z.object({
-  type: z.literal("abort"),
-  threadId: z.string(),
-});
+type WsMessageHandler = (client: ClientContext, message: any, ws: WSContext<WebSocket>, event: Event) => void | Promise<void>;
 
-const promptMessageSchema = z.object({
-  type: z.literal("prompt"),
-  threadId: z.string(),
-  prompt: z.string(),
-});
+class WsError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
-const authMessageSchema = z.object({
-  type: z.literal("auth"),
-  authToken: z.string(),
-});
+function wsEndpoint<T>(schema: z.ZodSchema<T>, handler: (client: ClientContext, message: T, ws: WSContext<WebSocket>, event: Event) => void | Promise<void>): WsMessageHandler {
+  return async (client, message, ws, event) => {
+    let parsed: T;
+    try {
+      parsed = schema.parse(message);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        ws.send(JSON.stringify({
+          type: "error",
+          code: "INVALID_MESSAGE",
+          message: "Invalid message format.",
+          err,
+        }));
+        return;
+      }
+      throw err;
+    }
+
+    try {
+      await handler(client, parsed, ws, event);
+    } catch (err) {
+      if (err instanceof WsError) {
+        ws.send(JSON.stringify({
+          type: "error",
+          code: err.code,
+          message: err.message,
+        }));
+        return;
+      }
+      throw err;
+    }
+  }
+}
 
 const trelloSetupSchema = z.object({
   type: z.literal("trello.setup"),
   apiKey: z.string(),
+  secret: z.string(),
   token: z.string(),
 });
+
+const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (client, message, ws) => {
+  const { apiKey, secret, token } = message;
+
+  if (await trelloIsConfigured()) {
+    throw new WsError("TRELLO_ALREADY_CONFIGURED", "Trello is already configured.");
+  }
+  
+  await setTrelloConfig({
+    apiKey,
+    secret,
+    token,
+  });
+
+  const { email } = await getTrelloMember(token);
+
+  client.email = email;
+  ws.send(JSON.stringify({ type: "trello.setup.success" }));
+  await setPermissions(email, ['*']);
+
+  const authToken = await generateAuthToken({ email });
+  ws.send(JSON.stringify({
+    type: "auth",
+    authToken,
+  }));
+});
+
 
 const trelloAuthSchema = z.object({
   type: z.literal("trello.auth"),
   token: z.string(),
 });
 
-const trelloPermissionsSetSchema = z.object({
-  type: z.literal("trello.permissions.set"),
-  memberId: z.string(),
-  permissions: z.object({
-    view: z.boolean(),
-    edit: z.boolean(),
-  }),
+const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (client, message, ws) => {
+  const { token } = message;
+
+  if (!await trelloIsConfigured()) {
+    throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
+  }
+
+  const { email } = await getTrelloMember(token);
+  client.email = email;
+
+  const authToken = await generateAuthToken({ email });
+  ws.send(JSON.stringify({
+    type: "auth",
+    authToken,
+  }));
 });
 
-const trelloPermissionsListSchema = z.object({
-  type: z.literal("trello.permissions.list"),
+const authMessageSchema = z.object({
+  type: z.literal("auth"),
+  authToken: z.string().optional(),
 });
 
-const trelloOAuthRequestSchema = z.object({
-  type: z.literal("trello.oauth.request"),
-  returnUrl: z.string(),
+const authEndpoint = wsEndpoint(authMessageSchema, async (client, message, ws) => {
+  if (!await trelloIsConfigured()) {
+    throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
+  }
+
+  console.log("Received auth message:", message);
+
+  if (!message.authToken) {
+    ws.send(JSON.stringify({
+      type: "trello.auth.request",
+      key: await getTrelloApiKey(),
+    }));
+    return;
+  } else {
+    try {
+      const payload = await verifyAuthToken(message.authToken);
+      if (typeof payload.email !== "string") {
+        throw new WsError("INVALID_TOKEN", "Invalid auth token payload.");
+      }
+      client.email = payload.email;
+    } catch (err) {
+      console.error("Failed to verify auth token:", err);
+      ws.send(JSON.stringify({
+        type: "trello.auth.request",
+        key: await getTrelloApiKey(),
+      }));
+      throw new WsError("INVALID_TOKEN", "Failed to verify auth token.");
+    }
+  }
 });
+
+async function checkPermissions(client: ClientContext, permission: UserPermission[]) {
+  if (!client.email) {
+    throw new WsError("UNAUTHORIZED", "Not authenticated.");
+  }
+
+  for (const perm of permission) {
+    if (!await hasPermission(client.email, perm)) {
+      throw new WsError("FORBIDDEN", `Missing required permission: ${perm}`);
+    }
+  }
+}
 
 const threadCreateSchema = z.object({
   type: z.literal("thread.create"),
   threadId: z.string(),
 });
 
-const messageSchema = z.union([
-  subscribeMessageSchema,
-  abortMessageSchema,
-  promptMessageSchema,
-  authMessageSchema,
-  trelloSetupSchema,
-  trelloAuthSchema,
-  trelloPermissionsSetSchema,
-  trelloPermissionsListSchema,
-  trelloOAuthRequestSchema,
-  threadCreateSchema,
-]);
+const threadCreateEndpoint = wsEndpoint(threadCreateSchema, async (client, message, ws) => {
+  await checkPermissions(client, ['thread.create']);
 
-async function fetchTrelloMember(apiKey: string, token: string) {
-  const url = new URL("https://api.trello.com/1/members/me");
-  url.searchParams.set("key", apiKey);
-  url.searchParams.set("token", token);
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Trello auth failed (${response.status}): ${text}`);
+  const { threadId } = message;
+  const exists = await codex.threadExists(threadId);
+  if (exists) {
+    throw new WsError("THREAD_ALREADY_EXISTS", `Thread ${threadId} already exists.`);
   }
-  return response.json() as Promise<{ id: string; username?: string }>;
-}
+
+  await codex.thread(threadId);
+  ws.send(JSON.stringify({ type: "thread.created", threadId }));
+});
+
+
+const subscribeMessageSchema = z.object({
+  type: z.literal("thread.subscribe"),
+  threadId: z.string(),
+});
+
+const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (client, message, ws) => {
+  const { threadId } = message;
+
+  await checkPermissions(client, ['thread.view']);
+
+  if (client.codexClients.has(threadId)) {
+    throw new WsError("ALREADY_SUBSCRIBED", `Already subscribed to thread ${threadId}.`);
+  }
+
+  const exists = await codex.threadExists(threadId);
+  if (!exists) {
+    logger.warn(`Client attempted to subscribe to non-existent thread: ${threadId}`);
+    throw new WsError("THREAD_NOT_FOUND", `Thread ${threadId} does not exist.`);
+  }
+
+  const thread = codex.thread(message.threadId);
+  const clientInstance = thread.newClient(client.email!);
+  client.codexClients.set(threadId, clientInstance);
+
+  clientInstance.subscribe(event => {
+    ws.send(JSON.stringify({
+      type: "thread.event",
+      threadId,
+      event
+    }));
+  });
+
+  for await (const pastEvent of thread.pastEvents()) {
+    ws.send(JSON.stringify({
+      type: "thread.event",
+      threadId,
+      event: pastEvent
+    }));
+  }
+});
+
+const abortMessageSchema = z.object({
+  type: z.literal("thread.abort"),
+  threadId: z.string(),
+});
+
+const abortEndpoint = wsEndpoint(abortMessageSchema, async (client, message, ws) => {
+  const { threadId } = message;
+
+  await checkPermissions(client, ['thread.abort']);
+
+  const clientInstance = client.codexClients.get(threadId);
+  if (!clientInstance) {
+    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}`);
+  }
+
+  clientInstance.sendAbortSignal();
+});
+
+const promptMessageSchema = z.object({
+  type: z.literal("thread.prompt"),
+  threadId: z.string(),
+  prompt: z.string(),
+});
+
+const promptEndpoint = wsEndpoint(promptMessageSchema, async (client, message, ws) => {
+  const { threadId, prompt } = message;
+
+  await checkPermissions(client, ['thread.prompt']);
+
+  const clientInstance = client.codexClients.get(threadId);
+  if (!clientInstance) {
+    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}`);
+  }
+
+  clientInstance.sendPrompt(prompt);
+});
+
+
+
+const permissionsSetSchema = z.object({
+  type: z.literal("permissions.set"),
+  memberId: z.string(),
+  permissions: z.object({
+    view: z.boolean(),
+    edit: z.boolean(),
+    create: z.boolean(),
+  }),
+});
+
+const permissionsListSchema = z.object({
+  type: z.literal("permissions.list"),
+});
+
+const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (client, message, ws) => {
+  await checkPermissions(client, ['admin']);
+
+  const permissions: UserPermission[] = [];
+  if (message.permissions.view) permissions.push('thread.view');
+  if (message.permissions.edit) {
+    permissions.push('thread.prompt');
+    permissions.push('thread.abort');
+  }
+  if (message.permissions.create) permissions.push('thread.create');
+
+  await setPermissions(message.memberId, permissions);
+  ws.send(JSON.stringify({ type: "permissions.updated" }));
+});
+
+const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (client, message, ws) => {
+  await checkPermissions(client, ['admin']);
+  const permissions = await listPermissions();
+  ws.send(JSON.stringify({ type: "permissions.list", permissions }));
+});
+
+
+// const messageSchema = z.union([
+//   subscribeMessageSchema,
+//   abortMessageSchema,
+//   promptMessageSchema,
+//   authMessageSchema,
+//   trelloSetupSchema,
+//   trelloAuthSchema,
+//   trelloPermissionsSetSchema,
+//   trelloPermissionsListSchema,
+//   trelloOAuthRequestSchema,
+//   threadCreateSchema,
+// ]);
+
+
+const endpoints: Record<string, WsMessageHandler> = {
+  "auth": authEndpoint,
+  "trello.setup": trelloSetupEndpoint,
+  "trello.auth": trelloAuthEndpoint,
+  "thread.create": threadCreateEndpoint,
+  "thread.subscribe": subscribeEndpoint,
+  "thread.prompt": promptEndpoint,
+  "thread.abort": abortEndpoint,
+  "permissions.set": permissionsSetEndpoint,
+  "permissions.list": permissionsListEndpoint,
+};
 
 
 export const websocketHandler = upgradeWebSocket(c => {
-  const connInfo = getConnInfo(c);
-  const ip = connInfo.remote.address;
-  const clientId = `${randomStr(8)} (${ip})`;
-  logger.log(`New WebSocket connection from: ${clientId}`);
 
   const codexClients = new Map<string, SharedThreadClient>();
-  let connectionAuthToken: string | null = null;
-  let memberId: string | null = null;
-  let ownerId: string | null = null;
-  let permissions = { view: false, edit: false };
-
-  function isOwner() {
-    return !!memberId && !!ownerId && memberId === ownerId;
-  }
-
-  function canView() {
-    return isOwner() || permissions.view;
-  }
-
-  function canEdit() {
-    return isOwner() || permissions.edit;
-  }
-
-  async function updatePermissions(configOwnerId: string, currentMemberId: string) {
-    ownerId = configOwnerId;
-    if (currentMemberId === configOwnerId) {
-      permissions = { view: true, edit: true };
-      return;
-    }
-    const stored = await readPermissions();
-    permissions = stored[currentMemberId] || { view: false, edit: false };
-  }
-
-  function sendStatus(ws: any, configured: boolean, currentOwnerId?: string | null) {
-    ws.send(JSON.stringify({
-      type: "trello.status",
-      configured,
-      ownerId: currentOwnerId || null,
-    }));
-  }
-
-  function sendAuthStatus(ws: any) {
-    ws.send(JSON.stringify({
-      type: "trello.auth.status",
-      authorized: !!memberId && canView(),
-      owner: isOwner(),
-      memberId,
-      permissions,
-    }));
-  }
+  const ctx: ClientContext = {
+    codexClients,
+    email: undefined,
+  };
 
   return {
     onOpen: (event, ws) => {
-      logger.log(`WebSocket connection opened for: ${clientId}`);
       void (async () => {
-        const config = await readTrelloConfig();
-        sendStatus(ws, !!config, config?.ownerId || null);
+        const configured = await trelloIsConfigured();
+        ws.send(JSON.stringify({
+          type: "trello.status",
+          configured,
+        }));
       })();
     },
     onMessage: async (event, ws) => {
+      let data: any;
       try {
-        const data = JSON.parse(event.data.toString());
-        const message = messageSchema.parse(data);
-
-        if (message.type === "auth") {
-          connectionAuthToken = message.authToken;
-          logger.log(`WebSocket auth token received: ${connectionAuthToken}`);
-          return;
-        }
-
-        if (message.type === "trello.setup") {
-          const existing = await readTrelloConfig();
-          if (existing) {
-            ws.send(JSON.stringify({ type: "error", error: "Trello is already configured." }));
-            return;
-          }
-          const member = await fetchTrelloMember(message.apiKey, message.token);
-          await writeTrelloConfig({
-            apiKey: message.apiKey,
-            token: message.token,
-            ownerId: member.id,
-          });
-          memberId = member.id;
-          await updatePermissions(member.id, member.id);
-          const stored = await readPermissions();
-          if (!stored[member.id]) {
-            stored[member.id] = { view: true, edit: true };
-            await writePermissions(stored);
-          }
-          sendStatus(ws, true, member.id);
-          sendAuthStatus(ws);
-          return;
-        }
-
-        if (message.type === "trello.auth") {
-          const config = await readTrelloConfig();
-          if (!config) {
-            sendStatus(ws, false, null);
-            ws.send(JSON.stringify({ type: "error", error: "Trello is not configured." }));
-            return;
-          }
-          const member = await fetchTrelloMember(config.apiKey, message.token);
-          memberId = member.id;
-          await updatePermissions(config.ownerId, member.id);
-          sendAuthStatus(ws);
-          if (!canView()) {
-            ws.send(JSON.stringify({ type: "error", error: "Not authorized." }));
-          }
-          return;
-        }
-
-        if (message.type === "trello.permissions.list") {
-          if (!isOwner()) {
-            ws.send(JSON.stringify({ type: "error", error: "Only the owner can view permissions." }));
-            return;
-          }
-          const stored = await readPermissions();
-          if (ownerId && !stored[ownerId]) {
-            stored[ownerId] = { view: true, edit: true };
-          }
-          ws.send(JSON.stringify({ type: "trello.permissions", permissions: stored }));
-          return;
-        }
-
-        if (message.type === "trello.oauth.request") {
-          const config = await readTrelloConfig();
-          if (!config) {
-            sendStatus(ws, false, null);
-            ws.send(JSON.stringify({ type: "error", error: "Trello is not configured." }));
-            return;
-          }
-          const oauthUrl = new URL("https://trello.com/1/authorize");
-          oauthUrl.searchParams.set("expiration", "never");
-          oauthUrl.searchParams.set("name", "trello-agent");
-          oauthUrl.searchParams.set("scope", "read,write,account");
-          oauthUrl.searchParams.set("response_type", "token");
-          oauthUrl.searchParams.set("key", config.apiKey);
-          oauthUrl.searchParams.set("return_url", message.returnUrl);
-          ws.send(JSON.stringify({ type: "trello.oauth.url", url: oauthUrl.toString() }));
-          return;
-        }
-
-        if (message.type === "trello.permissions.set") {
-          if (!isOwner()) {
-            ws.send(JSON.stringify({ type: "error", error: "Only the owner can update permissions." }));
-            return;
-          }
-          const stored = await readPermissions();
-          const nextPermissions = message.memberId === ownerId
-            ? { view: true, edit: true }
-            : message.permissions;
-          stored[message.memberId] = nextPermissions;
-          await writePermissions(stored);
-          ws.send(JSON.stringify({ type: "trello.permissions", permissions: stored }));
-          return;
-        }
-
-        if (message.type === "thread.create") {
-          if (!canEdit()) {
-            ws.send(JSON.stringify({ type: "error", error: "Not authorized." }));
-            return;
-          }
-          const exists = await codex.threadExists(message.threadId);
-          if (exists) {
-            ws.send(JSON.stringify({ type: "error", error: `Thread ${message.threadId} already exists` }));
-            return;
-          }
-          codex.thread(message.threadId);
-          ws.send(JSON.stringify({ type: "thread.created", threadId: message.threadId }));
-          return;
-        }
-
-        if (message.type === "subscribe") {
-          if (!memberId || !canView()) {
-            ws.send(JSON.stringify({ type: "error", error: "Not authorized." }));
-            sendAuthStatus(ws);
-            return;
-          }
-          const { threadId } = message;
-          if (codexClients.has(threadId)) {
-            ws.send(JSON.stringify({
-              type: "error",
-              error: `Already subscribed to thread ${threadId}`
-            }));
-            return;
-          }
-
-          const exists = await codex.threadExists(threadId);
-          if (!exists) {
-            logger.warn(`Client ${clientId} attempted to subscribe to non-existent thread: ${threadId}`);
-            ws.send(JSON.stringify({
-              type: "error",
-              error: `Thread ${threadId} does not exist`
-            }));
-            return;
-          }
-
-          const thread = codex.thread(message.threadId);
-          const client = thread.newClient(clientId ?? "unknown");
-          codexClients.set(threadId, client);
-
-          client.subscribe(event => {
-            ws.send(JSON.stringify({
-              type: "thread.event",
-              threadId,
-              event
-            }));
-          });
-
-          for await (const pastEvent of thread.pastEvents()) {
-            ws.send(JSON.stringify({
-              type: "thread.event",
-              threadId,
-              event: pastEvent
-            }));
-          }
-        } else if (message.type === "abort") {
-          if (!memberId || !canEdit()) {
-            ws.send(JSON.stringify({ type: "error", error: "Not authorized." }));
-            sendAuthStatus(ws);
-            return;
-          }
-          const { threadId } = message;
-          const client = codexClients.get(threadId);
-          if (!client) {
-            ws.send(JSON.stringify({
-              type: "error",
-              error: `Not subscribed to thread ${threadId}`
-            }));
-            return;
-          }
-          client.sendAbortSignal();
-        } else if (message.type === "prompt") {
-          if (!memberId || !canEdit()) {
-            ws.send(JSON.stringify({ type: "error", error: "Not authorized." }));
-            sendAuthStatus(ws);
-            return;
-          }
-          const { threadId, prompt } = message;
-          const client = codexClients.get(threadId);
-          if (!client) {
-            ws.send(JSON.stringify({
-              type: "error",
-              error: `Not subscribed to thread ${threadId}`
-            }));
-            return;
-          }
-          client.sendPrompt(prompt);
-        }
+        data = JSON.parse(event.data.toString());
       } catch (err) {
-        logger.warn(`Received invalid message from ${clientId}`);
         ws.send(JSON.stringify({
           type: "error",
-          error: "Invalid message format."
+          code: "INVALID_JSON",
+          message: "Invalid JSON format."
         }));
         return;
       }
+
+      const endpoint = endpoints[data.type];
+
+      if (!endpoint) {
+        ws.send(JSON.stringify({
+          type: "error",
+          code: "UNKNOWN_MESSAGE_TYPE",
+          message: `Unknown message type: ${data.type}`
+        }));
+        return;
+      }
+
+      try {
+        await endpoint(ctx, data, ws, event);
+      } catch (err) {
+        console.error(`Error handling message of type ${data.type}:`, err);
+        ws.send(JSON.stringify({
+          type: "error",
+          code: "INTERNAL_ERROR",
+          message: "An internal error occurred."
+        }));
+      }
+
+      return;
     },
     onClose: (event, ws) => {
-      logger.log(`WebSocket connection closed for: ${clientId}`);
+      // logger.log(`WebSocket connection closed for: ${clientId}`);
     },
   }
 });

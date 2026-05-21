@@ -10,15 +10,32 @@ function generateAuthToken() {
   return Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-function getOrCreateAuthToken() {
-  const existing = window.localStorage.getItem('trelloAgentAuthToken');
-  if (existing) return existing;
-  const created = generateAuthToken();
-  window.localStorage.setItem('trelloAgentAuthToken', created);
-  return created;
+function getStoredAuthToken() {
+  return window.localStorage.getItem('trelloAgentAuthToken');
 }
 
-function initializeWebSocket(authToken) {
+function readTrelloTokenFromHash() {
+  if (!window.location.hash) return null;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const token = params.get('token');
+  if (!token) return null;
+  window.history.replaceState({}, document.title, window.location.pathname);
+  return token;
+}
+
+function buildTrelloAuthUrl(key) {
+  const returnUrl = `${window.location.origin}${window.location.pathname}`;
+  const url = new URL('https://trello.com/1/authorize');
+  url.searchParams.set('expiration', '1hour');
+  url.searchParams.set('name', 'trello-agent');
+  url.searchParams.set('scope', 'read,account');
+  url.searchParams.set('response_type', 'token');
+  url.searchParams.set('key', key);
+  url.searchParams.set('return_url', returnUrl);
+  return url.toString();
+}
+
+function initializeWebSocket() {
   return new Promise((resolve, reject) => {
     const websocket = new WebSocket('/ws');
     const callbacks = { __all: [] };
@@ -29,13 +46,13 @@ function initializeWebSocket(authToken) {
           callbacks[threadId] = [];
         }
         callbacks[threadId].push(callback);
-        websocket.send(JSON.stringify({ type: 'subscribe', threadId }));
+        websocket.send(JSON.stringify({ type: 'thread.subscribe', threadId }));
       },
       sendPrompt: (threadId, prompt) => {
-        websocket.send(JSON.stringify({ type: 'prompt', threadId, prompt }));
+        websocket.send(JSON.stringify({ type: 'thread.prompt', threadId, prompt }));
       },
       abort: (threadId) => {
-        websocket.send(JSON.stringify({ type: 'abort', threadId }));
+        websocket.send(JSON.stringify({ type: 'thread.abort', threadId }));
       },
       sendAuth: (token) => {
         websocket.send(JSON.stringify({ type: 'auth', authToken: token }));
@@ -46,14 +63,14 @@ function initializeWebSocket(authToken) {
       sendTrelloAuth: (payload) => {
         websocket.send(JSON.stringify({ type: 'trello.auth', ...payload }));
       },
-      requestTrelloOAuth: (payload) => {
-        websocket.send(JSON.stringify({ type: 'trello.oauth.request', ...payload }));
+      requestTrelloKey: () => {
+        websocket.send(JSON.stringify({ type: 'auth' }));
       },
       sendPermissionsUpdate: (payload) => {
-        websocket.send(JSON.stringify({ type: 'trello.permissions.set', ...payload }));
+        websocket.send(JSON.stringify({ type: 'permissions.set', ...payload }));
       },
       requestPermissions: () => {
-        websocket.send(JSON.stringify({ type: 'trello.permissions.list' }));
+        websocket.send(JSON.stringify({ type: 'permissions.list' }));
       },
       onOpen: (handler) => websocket.addEventListener('open', handler),
       onClose: (handler) => websocket.addEventListener('close', handler),
@@ -63,9 +80,6 @@ function initializeWebSocket(authToken) {
 
     websocket.addEventListener('open', () => {
       console.log('WebSocket connection established');
-      if (authToken) {
-        api.sendAuth(authToken);
-      }
       resolve(api);
     });
 
@@ -126,8 +140,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     'Thread',
   ].map(importComponent));
 
-  const authToken = getOrCreateAuthToken();
-  const api = await initializeWebSocket(authToken);
+  const api = await initializeWebSocket();
+  const authToken = getStoredAuthToken();
+
+  const pendingTrelloToken = readTrelloTokenFromHash();
+  if (pendingTrelloToken) {
+    api.sendTrelloAuth({ token: pendingTrelloToken });
+  } else {
+    api.sendAuth(authToken);
+  }
 
   const app = PetiteVue.reactive({
     route: '',
@@ -137,34 +158,51 @@ document.addEventListener('DOMContentLoaded', async () => {
       configured: false,
       ownerId: null,
     },
+    trelloKey: null,
     trelloAuth: {
       authorized: false,
       owner: false,
       memberId: null,
-      permissions: { view: false, edit: false },
+      permissions: { view: false, edit: false, create: false },
     },
     trelloPermissions: {},
+    oauthRequested: false,
+    pendingTrelloToken,
   })
   window.app = app; // Expose app for debugging
+
+  app.consumePendingToken = () => {
+    const token = app.pendingTrelloToken;
+    app.pendingTrelloToken = null;
+    return token;
+  };
 
   app.route = location.pathname;
 
   api.onMessage((message) => {
     if (message?.type === 'trello.status') {
-      app.trelloStatus = {
-        configured: !!message.configured,
-        ownerId: message.ownerId || null,
-      };
+      const { configured } = message;
+      if (!configured) {
+        location.assign('/');
+      }
+      // app.trelloStatus = {
+      //   configured: !!message.configured,
+      //   ownerId: message.ownerId || null,
+      // };
     }
-    if (message?.type === 'trello.auth.status') {
-      app.trelloAuth = {
-        authorized: !!message.authorized,
-        owner: !!message.owner,
-        memberId: message.memberId || null,
-        permissions: message.permissions || { view: false, edit: false },
-      };
+    if (message?.type === 'trello.auth.request') {
+      const key = message.key;
+      window.location.assign(buildTrelloAuthUrl(key));
+      // app.trelloKey = message.key || null;
+      // if (app.oauthRequested && app.trelloStatus.configured && app.trelloKey) {
+      //   window.location.assign(buildTrelloAuthUrl(app.trelloKey));
+      // }
     }
-    if (message?.type === 'trello.permissions') {
+    if (message?.type === 'auth' && message.authToken) {
+      window.localStorage.setItem('trelloAgentAuthToken', message.authToken);
+      app.authToken = message.authToken;
+    }
+    if (message?.type === 'permissions.list' || message?.type === 'trello.permissions') {
       app.trelloPermissions = message.permissions || {};
     }
   });

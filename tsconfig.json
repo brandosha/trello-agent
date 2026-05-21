@@ -3,6 +3,7 @@
     "types": ["node"],
     "outDir": "dist",
     "module": "node20",
-    "skipLibCheck": true,
-  }
+    "skipLibCheck": true
+  },
+  "exclude": ["node_modules", "dist", "data"]
 }
