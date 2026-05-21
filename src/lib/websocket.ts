@@ -6,7 +6,7 @@ import { generateAuthToken, verifyAuthToken } from "./auth.js";
 import { codex, SharedThreadClient } from "./codex.js";
 import { logger } from "./Logger.js";
 import { trelloIsConfigured, getTrelloMember, setTrelloConfig, getTrelloApiKey } from "./trello.js";
-import { hasPermission, listPermissions, setPermissions, UserPermission } from "./permissions.js";
+import { hasPermission, listPermissions, getPermissions, setPermissions, UserPermission } from "./permissions.js";
 import { WSContext } from "hono/ws";
 
 interface ClientContext {
@@ -148,6 +148,16 @@ const authEndpoint = wsEndpoint(authMessageSchema, async (client, message, ws) =
       throw new WsError("INVALID_TOKEN", "Failed to verify auth token.");
     }
   }
+
+  ws.send(JSON.stringify({
+    type: "auth.success",
+    email: client.email,
+  }));
+
+  ws.send(JSON.stringify({
+    type: "auth.permissions",
+    permissions: await getPermissions(client.email),
+  }));
 });
 
 async function checkPermissions(client: ClientContext, permission: UserPermission[]) {
@@ -264,11 +274,7 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (client, message, w
 const permissionsSetSchema = z.object({
   type: z.literal("permissions.set"),
   memberId: z.string(),
-  permissions: z.object({
-    view: z.boolean(),
-    edit: z.boolean(),
-    create: z.boolean(),
-  }),
+  permissions: z.array(z.string()),
 });
 
 const permissionsListSchema = z.object({
@@ -278,16 +284,23 @@ const permissionsListSchema = z.object({
 const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (client, message, ws) => {
   await checkPermissions(client, ['admin']);
 
-  const permissions: UserPermission[] = [];
-  if (message.permissions.view) permissions.push('thread.view');
-  if (message.permissions.edit) {
-    permissions.push('thread.prompt');
-    permissions.push('thread.abort');
-  }
-  if (message.permissions.create) permissions.push('thread.create');
+  const permissions = Array.from(new Set(
+    message.permissions
+      .map((permission) => permission.trim())
+      .filter(Boolean)
+  )) as UserPermission[];
 
-  await setPermissions(message.memberId, permissions);
-  ws.send(JSON.stringify({ type: "permissions.updated" }));
+  try {
+    await setPermissions(message.memberId, permissions);
+    ws.send(JSON.stringify({ type: "permissions.updated", permissions }));
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      throw new WsError("INVALID_PERMISSIONS", "Invalid permissions format.");
+    } else {
+      console.error("Error setting permissions:", err);
+      throw new WsError("INTERNAL_ERROR", "Failed to set permissions.");
+    }
+  }
 });
 
 const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (client, message, ws) => {

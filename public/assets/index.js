@@ -1,19 +1,3 @@
-function generateAuthToken() {
-  const bytes = new Uint8Array(16);
-  if (window.crypto?.getRandomValues) {
-    window.crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  return Array.from(bytes).map((value) => value.toString(16).padStart(2, '0')).join('');
-}
-
-function getStoredAuthToken() {
-  return window.localStorage.getItem('trelloAgentAuthToken');
-}
-
 function readTrelloTokenFromHash() {
   if (!window.location.hash) return null;
   const params = new URLSearchParams(window.location.hash.slice(1));
@@ -113,7 +97,6 @@ function initializeWebSocket() {
   });
 }
 
-// UI is handled by petite-vue components.
 
 async function importComponent(path) {
   const content = await fetch(`/assets/components/${path}.html`).then(res => res.text());
@@ -141,14 +124,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   ].map(importComponent));
 
   const api = await initializeWebSocket();
-  const authToken = getStoredAuthToken();
+  const authToken = window.localStorage.getItem('trelloAgentAuthToken') || undefined;
+  console.log(authToken);
 
   const pendingTrelloToken = readTrelloTokenFromHash();
-  if (pendingTrelloToken) {
-    api.sendTrelloAuth({ token: pendingTrelloToken });
-  } else {
-    api.sendAuth(authToken);
-  }
 
   const app = PetiteVue.reactive({
     route: '',
@@ -156,17 +135,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     authToken,
     trelloStatus: {
       configured: false,
-      ownerId: null,
+      // ownerId: null,
     },
-    trelloKey: null,
-    trelloAuth: {
+    // trelloKey: null,
+    user: {
       authorized: false,
       owner: false,
-      memberId: null,
-      permissions: { view: false, edit: false, create: false },
+      // memberId: null,
+      permissions: [],
     },
-    trelloPermissions: {},
-    oauthRequested: false,
+    // trelloPermissions: {},
+    // oauthRequested: false,
     pendingTrelloToken,
   })
   window.app = app; // Expose app for debugging
@@ -177,13 +156,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     return token;
   };
 
+  app.hasPermission = (permission) => {
+    const permissions = app.user.permissions;
+    if (!permissions) {
+      return false;
+    }
+  
+    if (permissions.includes('*') || permissions.includes(permission)) {
+      return true;
+    }
+  
+    let parts = permission.split('.');
+    while (parts.length > 2) {
+      parts.pop();
+      const permToCheck = parts.join('.');
+      if (permissions.includes(permToCheck)) {
+        return true;
+      }
+    }
+  
+    return false;
+  }
+
   app.route = location.pathname;
 
   api.onMessage((message) => {
     if (message?.type === 'trello.status') {
       const { configured } = message;
-      if (!configured) {
-        location.assign('/');
+
+      if (configured) {
+        if (pendingTrelloToken) {
+          api.sendTrelloAuth({ token: app.consumePendingToken() });
+        } else {
+          api.sendAuth(authToken);
+        }
+      } else {
+        // Redirect to the console for setup if Trello isn't configured
+        if (location.pathname !== '/') {
+          location.assign('/');
+        }
       }
       // app.trelloStatus = {
       //   configured: !!message.configured,
@@ -201,6 +212,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (message?.type === 'auth' && message.authToken) {
       window.localStorage.setItem('trelloAgentAuthToken', message.authToken);
       app.authToken = message.authToken;
+    }
+    if (message?.type === 'auth.success') {
+      app.user.authorized = true;
+    }
+    if (message?.type === 'auth.permissions') {
+      app.user.permissions = Array.isArray(message.permissions) ? message.permissions : [];
     }
     if (message?.type === 'permissions.list' || message?.type === 'trello.permissions') {
       app.trelloPermissions = message.permissions || {};

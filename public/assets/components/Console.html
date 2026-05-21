@@ -38,32 +38,25 @@
           </div>
         </div>
       </section>
-      <section v-if="isOwner" class="panel">
+      <section v-if="isAdmin" class="panel">
         <div class="panel-header">User permissions</div>
         <div class="panel-body stack">
           <div>
             <div class="label">Trello member ID</div>
             <input v-model="permissionMemberId" type="text" class="input" placeholder="member id" />
           </div>
-          <label class="badge">
-            <input type="checkbox" v-model="permissionView" />
-            View
-          </label>
-          <label class="badge">
-            <input type="checkbox" v-model="permissionEdit" />
-            Edit
-          </label>
-          <label class="badge">
-            <input type="checkbox" v-model="permissionCreate" />
-            Create
-          </label>
+          <div>
+            <div class="label">Permissions (comma-separated)</div>
+            <input v-model="permissionList" type="text" class="input" placeholder="thread.view, thread.prompt, thread.abort" />
+            <div class="badge">Use * for full access.</div>
+          </div>
           <button class="btn primary" @click="savePermissions">Save permissions</button>
           <div class="panel">
             <div class="panel-header">Current permissions</div>
             <div class="panel-body">
               <div v-if="permissionEntries.length === 0" class="badge">No users yet.</div>
               <div v-for="entry in permissionEntries" :key="entry.id" class="badge">
-                {{ entry.id }}: view={{ entry.view }}, edit={{ entry.edit }}, create={{ entry.create }}
+                {{ entry.id }}: {{ entry.listLabel }}
               </div>
             </div>
           </div>
@@ -82,9 +75,7 @@
       statusMessage: '',
       errorMessage: '',
       permissionMemberId: '',
-      permissionView: false,
-      permissionEdit: false,
-      permissionCreate: false,
+      permissionList: '',
       mounted() {
         this.api = app.api;
         if (!this.api) return;
@@ -108,31 +99,43 @@
             window.localStorage.removeItem('trelloAgentApiSecretDraft');
           }
         }
+
+        if (this.isAdmin) {
+          this.api.requestPermissions();
+        }
       },
       get configured() {
         return app.trelloStatus.configured;
       },
       get authorized() {
-        return app.trelloAuth.authorized;
+        return app.user.authorized;
       },
-      get isOwner() {
-        return app.trelloAuth.owner;
+      get isAdmin() {
+        return app.hasPermission ? app.hasPermission('admin') : false;
       },
       get memberId() {
-        return app.trelloAuth.memberId;
+        return app.user.memberId;
       },
       get permissionEntries() {
         const permissions = app.trelloPermissions || {};
-        return Object.entries(permissions).map(([id, perms]) => ({
-          id,
-          view: !!perms.view,
-          edit: !!perms.edit,
-          create: !!perms.create,
-        }));
+        return Object.entries(permissions).map(([id, perms]) => {
+          const list = Array.isArray(perms) ? perms : [];
+          return {
+            id,
+            list,
+            listLabel: list.length ? list.join(', ') : 'none',
+          };
+        });
       },
       handleMessage(message) {
         if (message?.type === 'error') {
           this.errorMessage = message.error || 'Unknown error.';
+        }
+
+        if (message?.type === 'auth.permissions' || message?.type === 'permissions.updated') {
+          if (this.isAdmin) {
+            this.api.requestPermissions();
+          }
         }
       },
       loadDraftApiKey() {
@@ -171,13 +174,13 @@
           this.errorMessage = 'Member id is required.';
           return;
         }
+        const permissions = this.permissionList
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
         this.api.sendPermissionsUpdate({
           memberId: this.permissionMemberId,
-          permissions: {
-            view: !!this.permissionView,
-            edit: !!this.permissionEdit,
-            create: !!this.permissionCreate,
-          },
+          permissions,
         });
       },
     };

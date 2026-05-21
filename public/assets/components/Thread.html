@@ -24,6 +24,7 @@
         </div>
         <div class="panel-body">
           <div v-if="!authorized" class="badge">Trello authorization required to view this thread.</div>
+          <div v-else-if="!canView" class="badge">You do not have permission to view this thread.</div>
           <div v-else class="events" ref="eventsContainer">
             <div v-for="event in filteredEvents" :key="event.id" class="event" :class="event.tone">
               <div class="meta">
@@ -64,13 +65,13 @@
             </div>
           </div>
         </section>
-        <section class="panel" v-if="authorized">
+        <section class="panel" v-if="authorized && canView">
           <div class="panel-header">Controls</div>
           <div class="panel-body">
             <form class="input-row" @submit.prevent="sendPrompt">
-              <input v-model="promptInput" type="text" placeholder="Send input to agent" :disabled="!canEdit" />
-              <button type="submit" class="btn primary" :disabled="!canEdit">Send</button>
-              <button type="button" class="btn danger" :disabled="!canEdit" @click="sendAbort">Abort</button>
+              <input v-model="promptInput" type="text" placeholder="Send input to agent" :disabled="!canPrompt" />
+              <button type="submit" class="btn primary" :disabled="!canPrompt">Send</button>
+              <button type="button" class="btn danger" :disabled="!canAbort" @click="sendAbort">Abort</button>
             </form>
           </div>
         </section>
@@ -111,10 +112,16 @@
         this.subscribeToThread();
       },
       get authorized() {
-        return app.trelloAuth.authorized;
+        return app.user.authorized;
       },
-      get canEdit() {
-        return app.trelloAuth.permissions?.edit || app.trelloAuth.owner;
+      get canView() {
+        return app.hasPermission ? app.hasPermission('thread.view') : false;
+      },
+      get canPrompt() {
+        return app.hasPermission ? app.hasPermission('thread.prompt') : false;
+      },
+      get canAbort() {
+        return app.hasPermission ? app.hasPermission('thread.abort') : false;
       },
       setConnection(status, color) {
         this.connectionStatus = status;
@@ -138,19 +145,22 @@
       },
       sendPrompt() {
         const input = this.promptInput.trim();
-        if (!input || !this.api || !this.canEdit) return;
+        if (!input || !this.api || !this.canPrompt) return;
         this.api.sendPrompt(this.threadId, input);
         this.promptInput = '';
       },
       sendAbort() {
-        if (!this.api || !this.canEdit) return;
+        if (!this.api || !this.canAbort) return;
         this.api.abort(this.threadId);
       },
       handleMessage(message) {
-        
+        console.log('Received message in thread:', message);
+        if (message?.type === 'auth.permissions' || message?.type === 'auth.success') {
+          this.subscribeToThread();
+        }
       },
       subscribeToThread() {
-        if (this.subscribed || !this.api) return;
+        if (this.subscribed || !this.api || !this.authorized || !this.canView) return;
         this.subscribed = true;
         this.api.subscribe(this.threadId, (message) => {
           this.handleEvent(message);
