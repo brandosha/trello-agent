@@ -53,6 +53,12 @@ function initializeWebSocket() {
       sendPermissionsUpdate: (payload) => {
         websocket.send(JSON.stringify({ type: 'permissions.set', ...payload }));
       },
+      sendCodexLogin: () => {
+        websocket.send(JSON.stringify({ type: 'codex.login' }));
+      },
+      sendCodexLoginStop: () => {
+        websocket.send(JSON.stringify({ type: 'codex.login.stop' }));
+      },
       requestPermissions: () => {
         websocket.send(JSON.stringify({ type: 'permissions.list' }));
       },
@@ -120,6 +126,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([
     'Router',
     'Console',
+    'CodexLogin',
     'Thread',
   ].map(importComponent));
 

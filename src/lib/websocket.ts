@@ -1,4 +1,5 @@
 import { upgradeWebSocket } from "@hono/node-server";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { WebSocket } from "ws";
 import { z } from "zod";
 
@@ -12,6 +13,7 @@ import { WSContext } from "hono/ws";
 interface ClientContext {
   codexClients: Map<string, SharedThreadClient>;
   email?: string;
+  codexLoginProcess?: ChildProcessWithoutNullStreams;
 }
 
 type WsMessageHandler = (client: ClientContext, message: any, ws: WSContext<WebSocket>, event: Event) => void | Promise<void>;
@@ -277,10 +279,6 @@ const permissionsSetSchema = z.object({
   permissions: z.array(z.string()),
 });
 
-const permissionsListSchema = z.object({
-  type: z.literal("permissions.list"),
-});
-
 const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (client, message, ws) => {
   await checkPermissions(client, ['admin']);
 
@@ -303,10 +301,83 @@ const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (client, m
   }
 });
 
+
+const permissionsListSchema = z.object({
+  type: z.literal("permissions.list"),
+});
+
 const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (client, message, ws) => {
   await checkPermissions(client, ['admin']);
   const permissions = await listPermissions();
   ws.send(JSON.stringify({ type: "permissions.list", permissions }));
+});
+
+
+const codexLoginSchema = z.object({
+  type: z.literal("codex.login"),
+});
+
+const codexLoginEndpoint = wsEndpoint(codexLoginSchema, async (client, message, ws) => {
+  await checkPermissions(client, ['admin']);
+
+  if (client.codexLoginProcess && !client.codexLoginProcess.killed) {
+    throw new WsError("PROCESS_RUNNING", "Codex login is already running.");
+  }
+
+  const child = spawn("codex", ["login", "--device-auth"], {
+    env: process.env,
+  });
+  client.codexLoginProcess = child;
+
+  ws.send(JSON.stringify({ type: "codex.login.started" }));
+
+  child.stdout.on("data", (data) => {
+    ws.send(JSON.stringify({
+      type: "codex.login.output",
+      stream: "stdout",
+      text: data.toString(),
+    }));
+  });
+
+  child.stderr.on("data", (data) => {
+    ws.send(JSON.stringify({
+      type: "codex.login.output",
+      stream: "stderr",
+      text: data.toString(),
+    }));
+  });
+
+  child.on("error", (err) => {
+    client.codexLoginProcess = undefined;
+    ws.send(JSON.stringify({
+      type: "codex.login.error",
+      message: err.message,
+    }));
+  });
+
+  child.on("close", (code, signal) => {
+    client.codexLoginProcess = undefined;
+    ws.send(JSON.stringify({
+      type: "codex.login.exit",
+      code,
+      signal,
+    }));
+  });
+});
+
+const codexLoginStopSchema = z.object({
+  type: z.literal("codex.login.stop"),
+});
+
+const codexLoginStopEndpoint = wsEndpoint(codexLoginStopSchema, async (client, message, ws) => {
+  await checkPermissions(client, ['admin']);
+
+  if (!client.codexLoginProcess || client.codexLoginProcess.killed) {
+    throw new WsError("NO_PROCESS", "Codex login is not running.");
+  }
+
+  client.codexLoginProcess.kill("SIGTERM");
+  ws.send(JSON.stringify({ type: "codex.login.stopped" }));
 });
 
 
@@ -334,6 +405,8 @@ const endpoints: Record<string, WsMessageHandler> = {
   "thread.abort": abortEndpoint,
   "permissions.set": permissionsSetEndpoint,
   "permissions.list": permissionsListEndpoint,
+  "codex.login": codexLoginEndpoint,
+  "codex.login.stop": codexLoginStopEndpoint,
 };
 
 
@@ -393,7 +466,10 @@ export const websocketHandler = upgradeWebSocket(c => {
       return;
     },
     onClose: (event, ws) => {
-      // logger.log(`WebSocket connection closed for: ${clientId}`);
+      if (ctx.codexLoginProcess && !ctx.codexLoginProcess.killed) {
+        ctx.codexLoginProcess.kill();
+        ctx.codexLoginProcess = undefined;
+      }
     },
   }
 });

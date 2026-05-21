@@ -1,0 +1,90 @@
+<template id="codex-login-template">
+  <section class="panel" @vue:mounted="mounted">
+    <div class="panel-header">
+      <div>Codex device login</div>
+      <div class="badge">{{ statusLabel }}</div>
+    </div>
+    <div class="panel-body stack">
+      <div class="badge">Starts codex login --device-auth on the server.</div>
+      <div class="input-row">
+        <button class="btn primary" @click="startLogin" :disabled="running">Start device login</button>
+        <button class="btn danger" @click="stopLogin" :disabled="!running">Stop</button>
+      </div>
+      <div v-if="!outputHtml" class="badge">No output yet.</div>
+      <pre v-else v-html="outputHtml"></pre>
+    </div>
+  </section>
+</template>
+<script>
+  function CodexLogin() {
+    return {
+      $template: '#codex-login-template',
+      api: null,
+      outputHtml: '',
+      running: false,
+      statusLabel: 'Idle',
+      ansi: null,
+      mounted() {
+        this.api = app.api;
+        if (!this.api) return;
+        if (window.AnsiUp) {
+          this.ansi = new window.AnsiUp();
+        }
+        this.api.onMessage((message) => this.handleMessage(message));
+      },
+      startLogin() {
+        if (!this.api || this.running) return;
+        this.outputHtml = '';
+        this.statusLabel = 'Starting...';
+        this.api.sendCodexLogin();
+      },
+      stopLogin() {
+        if (!this.api || !this.running) return;
+        this.statusLabel = 'Stopping...';
+        this.api.sendCodexLoginStop();
+      },
+      appendOutput(text) {
+        if (!text) return;
+        if (this.ansi) {
+          this.outputHtml += this.ansi.ansi_to_html(text);
+        } else {
+          this.outputHtml += text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#x27;');
+        }
+      },
+      handleMessage(message) {
+        if (message?.type === 'codex.login.started') {
+          this.running = true;
+          this.statusLabel = 'Running';
+        }
+        if (message?.type === 'codex.login.output' && typeof message.text === 'string') {
+          this.appendOutput(message.text);
+        }
+        if (message?.type === 'codex.login.stopped') {
+          this.statusLabel = 'Stopping...';
+        }
+        if (message?.type === 'codex.login.error') {
+          this.running = false;
+          this.statusLabel = 'Error';
+          if (message.message) {
+            this.appendOutput(`\n${message.message}`);
+          }
+        }
+        if (message?.type === 'codex.login.exit') {
+          this.running = false;
+          this.statusLabel = 'Finished';
+          if (message.code !== undefined) {
+            this.appendOutput(`\nProcess exited with code ${message.code}.`);
+          }
+          if (message.signal) {
+            this.appendOutput(`\nProcess exited with signal ${message.signal}.`);
+          }
+        }
+      },
+    };
+  }
+</script>

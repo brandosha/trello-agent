@@ -61,6 +61,7 @@ function generateEventId() {
 export class SharedThread {
   id: string;
 
+  private _threadDir: string;
   private _filePath: string;
   private _thread: Promise<Thread>;
   private _threadQueue: Promise<Thread>;
@@ -71,17 +72,19 @@ export class SharedThread {
   private _logUnsubscribe: Unsubscribe;
   private _pubsub = new PubSub<SharedThreadEvent>();
 
-  constructor(id: string, options?: ThreadOptions) {
+  constructor(id: string, options: ThreadOptions = {}) {
     if (!/^[a-zA-Z0-9\_\-]+$/.test(id)) {
       throw new Error("Invalid thread ID");
     }
 
     this.id = id;
 
-    const threadDir = `${threadsDir}/${id}`;
-    const mkdir = fs.mkdir(threadDir, { recursive: true });
+    this._threadDir = `${threadsDir}/${id}`;
+    const workspaceDir = `${this._threadDir}/workspace`;
+    const mkdir = fs.mkdir(workspaceDir, { recursive: true });
+    options = this.configureOptions(options);
 
-    this._filePath = `${threadDir}/thread.jsonl`;
+    this._filePath = `${this._threadDir}/thread.jsonl`;
     this._fileAppendQueue = mkdir.then(() => fs.open(this._filePath, "a"));
     this._thread = mkdir.then(() => fs.open(this._filePath, "r"))
       .then(async handle => {
@@ -103,13 +106,22 @@ export class SharedThread {
       });
     this._threadQueue = this._thread;
 
-    this._logAppendQueue = mkdir.then(() => fs.open(`${threadDir}/log.jsonl`, "a"));
+    this._logAppendQueue = mkdir.then(() => fs.open(`${this._threadDir}/log.jsonl`, "a"));
     this._logUnsubscribe = this._logger.subscribe(message => {
       this._logAppendQueue = this._logAppendQueue.then(async handle => {
         await handle.appendFile(JSON.stringify(message) + "\n");
         return handle;
       });
     });
+  }
+
+  private configureOptions(options: ThreadOptions) {
+    const workspaceDir = `${this._threadDir}/workspace`;
+    return {
+      ...options,
+      workingDirectory: workspaceDir,
+      skipGitRepoCheck: true,
+    };
   }
 
   async isNew() {
@@ -119,6 +131,7 @@ export class SharedThread {
 
   async setOptions(options: ThreadOptions) {
     const thread = await this._thread;
+    options = this.configureOptions(options);
     if (thread.id) {
       this._thread = Promise.resolve(codexInterface.resumeThread(thread.id, options));
     } else {
@@ -285,6 +298,13 @@ class CodexSharedThreads {
     } catch {
       return false;
     }
+  }
+
+  async listThreads() {
+    const entries = await fs.readdir(threadsDir, { withFileTypes: true });
+    return entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name);
   }
 
   thread(id: string, options?: ThreadOptions) {
