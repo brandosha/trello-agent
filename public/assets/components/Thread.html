@@ -80,11 +80,11 @@
   </div>
 </template>
 <script>
-  function Thread() {
+  function Thread(threadId) {
     return {
       $template: '#thread-template',
       api: null,
-      threadId: '',
+      threadId,
       threadLabel: '(loading...)',
       connectionStatus: 'Connecting...',
       connectionColor: 'var(--muted)',
@@ -98,7 +98,6 @@
       promptInput: '',
       subscribed: false,
       mounted() {
-        this.threadId = location.pathname.slice(1);
         this.threadLabel = this.threadId || '(none)';
         this.api = app.api;
         if (!this.api) return;

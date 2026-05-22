@@ -199,8 +199,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       } else {
         // Redirect to the console for setup if Trello isn't configured
-        if (location.pathname !== '/') {
-          location.assign('/');
+        if (location.pathname !== '/console') {
+          location.assign('/console');
         }
       }
       // app.trelloStatus = {

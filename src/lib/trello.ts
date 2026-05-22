@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import fs from "fs/promises";
 
-import { configDir, mkConfigDir } from "./paths.js";
+import { configDir } from "./paths.js";
 
 const trelloConfigPath = `${configDir}/trello.json`;
 
@@ -29,7 +29,6 @@ export async function trelloIsConfigured(): Promise<boolean> {
 }
 
 export async function setTrelloConfig(newConfig: TrelloConfig): Promise<void> {
-  await mkConfigDir;
   const payload = JSON.stringify(newConfig, null, 2);
   storedConfig = Promise.resolve(newConfig);
   await fs.writeFile(trelloConfigPath, payload);

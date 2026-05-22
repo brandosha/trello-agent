@@ -1,5 +1,5 @@
 import path from "path";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import fs from "fs/promises";
 
 function getRootDir() {
@@ -18,5 +18,14 @@ function getRootDir() {
 export const rootDir = getRootDir();
 export const dataDir = path.join(rootDir, "data");
 export const configDir = path.join(dataDir, "config");
+export const threadsDir = path.join(dataDir, "threads");
 
-export const mkConfigDir = fs.mkdir(configDir, { recursive: true });
+if (!existsSync(dataDir)) {
+  mkdirSync(dataDir, { recursive: true });
+}
+
+if (!existsSync(threadsDir)) {
+  mkdirSync(threadsDir, { recursive: true });
+}
+
+// export const mkConfigDir = fs.mkdir(configDir, { recursive: true });

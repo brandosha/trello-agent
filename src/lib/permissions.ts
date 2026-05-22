@@ -2,7 +2,7 @@ import fs from "fs/promises";
 
 import { z } from "zod";
 
-import { configDir, mkConfigDir } from "./paths.js";
+import { configDir } from "./paths.js";
 import { ValueSub } from "./PubSub.js";
 
 const permissionsPath = `${configDir}/permissions.json`;
@@ -41,7 +41,6 @@ let permissionsIndex = (async () => {
 })();
 
 async function writePermissionsIndex(index: PermissionsIndex): Promise<PermissionsIndex> {
-  await mkConfigDir;
   permissionsIndex = permissionsIndex.then(async () => {
     await fs.writeFile(permissionsPath, JSON.stringify(index, null, 2));
     return index;

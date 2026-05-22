@@ -1,17 +1,22 @@
 <template id="router-template">
   <div class="router">
-    <div v-if="app.route === '/'">
-      <div v-scope="Console()"></div>
-    </div>
-    <div v-else>
-      <div v-scope="Thread()"></div>
-    </div>
+    <div v-scope="view()"></div>
   </div>
 </template>
 <script>
   function Router() {
     return {
       $template: '#router-template',
+      view() {
+        if (app.route === '/console') {
+          return Console();
+        } else if (app.route === '/') {
+          return Thread('default');
+        } else {
+          const threadId = app.route.slice(1);
+          return Thread(threadId);
+        }
+      }
     };
   }
 </script>

@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 
-import { configDir, mkConfigDir } from "./paths.js";
+import { configDir } from "./paths.js";
 
 import { SignJWT, jwtVerify, generateSecret, JWTPayload, exportJWK, importJWK } from "jose";
 
@@ -11,7 +11,6 @@ interface AuthPayload extends JWTPayload {
 const JWT_ALG = "HS256";
 
 const symmetricKey = (async () => {
-  await mkConfigDir;
   const keyPath = `${configDir}/jwt_secret.json`;
 
   try {

@@ -70,6 +70,7 @@ function generateEventId() {
 
 export class SharedThread extends HistorySub<SharedThreadEvent> {
   id: string;
+  workspaceDir: string;
 
   private _threadDir: string;
   private _filePath: string;
@@ -92,8 +93,8 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     this.id = id;
 
     this._threadDir = `${threadsDir}/${id}`;
-    const workspaceDir = `${this._threadDir}/workspace`;
-    const mkdir = fs.mkdir(workspaceDir, { recursive: true });
+    this.workspaceDir = `${this._threadDir}/workspace`;
+    const mkdir = fs.mkdir(this.workspaceDir, { recursive: true });
     options = this.configureOptions(options);
 
     this._filePath = `${this._threadDir}/thread.jsonl`;
@@ -129,10 +130,9 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
   }
 
   private configureOptions(options: ThreadOptions) {
-    const workspaceDir = `${this._threadDir}/workspace`;
     return {
       ...options,
-      workingDirectory: workspaceDir,
+      workingDirectory: this.workspaceDir,
       skipGitRepoCheck: true,
     };
   }
@@ -279,3 +279,6 @@ class CodexSharedThreads {
 }
 
 export const codex = new CodexSharedThreads();
+
+// Initialize default thread
+codex.thread("default");
