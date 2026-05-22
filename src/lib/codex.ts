@@ -4,7 +4,7 @@ import fs from "fs/promises";
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
 import { dataDir } from "./paths.js";
-import { PubSub, Unsubscribe } from "./PubSub.js";
+import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
 import { randomStr } from "./utils.js";
 
@@ -58,7 +58,7 @@ function generateEventId() {
   return randomStr(5);
 }
 
-export class SharedThread {
+export class SharedThread extends HistorySub<SharedThreadEvent> {
   id: string;
 
   private _threadDir: string;
@@ -70,9 +70,11 @@ export class SharedThread {
   private _logAppendQueue: Promise<fs.FileHandle>;
   private _logger = new Logger();
   private _logUnsubscribe: Unsubscribe;
-  private _pubsub = new PubSub<SharedThreadEvent>();
+  // private _pubsub = new PubSub<SharedThreadEvent>();
 
   constructor(id: string, options: ThreadOptions = {}) {
+    super()
+
     if (!/^[a-zA-Z0-9\_\-]+$/.test(id)) {
       throw new Error("Invalid thread ID");
     }
@@ -88,15 +90,16 @@ export class SharedThread {
     this._fileAppendQueue = mkdir.then(() => fs.open(this._filePath, "a"));
     this._thread = mkdir.then(() => fs.open(this._filePath, "r"))
       .then(async handle => {
+        let thread: Thread | undefined
         for await (const line of handle.readLines()) {
-          const startEvent = JSON.parse(line) as ThreadEvent;
-          if (startEvent.type === "thread.started") {
-            return codexInterface.resumeThread(startEvent.thread_id, options);
+          const event = JSON.parse(line) as SharedThreadEvent;
+          if (event.type === "thread.started") {
+            thread = codexInterface.resumeThread(event.thread_id, options);
           }
-          break;
+          this.publish(event);
         }
 
-        return codexInterface.startThread(options);
+        return thread ?? codexInterface.startThread(options);
       })
       .catch(err => {
         if (err.code === "ENOENT") {
@@ -139,8 +142,8 @@ export class SharedThread {
     }
   }
 
-  private queueInput(prompt: Input, from: string, options: TurnOptions = {}) {
-    this._pubsub.publish({
+  queueInput(prompt: Input, from: string, options: TurnOptions = {}) {
+    this.publish({
       type: "input.prompt.queued",
       from,
       prompt,
@@ -160,7 +163,7 @@ export class SharedThread {
         id: generateEventId(),
         timestamp: new Date(),
       };
-      this._pubsub.publish(inputEvent);
+      this.publish(inputEvent);
       this.recordEvent(inputEvent);
 
       options.signal = this._abortController.signal;
@@ -172,7 +175,7 @@ export class SharedThread {
             id: generateEventId(),
             timestamp: new Date(),
           };
-          this._pubsub.publish(sharedEvent);
+          this.publish(sharedEvent);
           this.recordEvent(sharedEvent);
         }
       } catch (err: any) {
@@ -182,7 +185,7 @@ export class SharedThread {
             id: generateEventId(),
             timestamp: new Date(),
           };
-          this._pubsub.publish(abortEvent);
+          this.publish(abortEvent);
           this.recordEvent(abortEvent);
         } else {
           const errorEvent: SharedThreadEvent = {
@@ -194,7 +197,7 @@ export class SharedThread {
             id: generateEventId(),
             timestamp: new Date(),
           };
-          this._pubsub.publish(errorEvent);
+          this.publish(errorEvent);
           this.recordEvent(errorEvent);
         }
       }
@@ -204,14 +207,14 @@ export class SharedThread {
     this._threadQueue = promise;
   }
 
-  private async abort(from: string) {
+  async abort(from: string) {
     const abortEvent: SharedThreadEvent = {
       type: "input.abort",
       id: generateEventId(),
       timestamp: new Date(),
       from,
     };
-    this._pubsub.publish(abortEvent);
+    this.publish(abortEvent);
     await this.recordEvent(abortEvent);
     
     this._abortController.abort();
@@ -227,64 +230,11 @@ export class SharedThread {
     return promise;
   }
 
-  async *pastEvents() {
-    await this._thread; // Ensure thread is initialized before reading events
-
-    const handle = await fs.open(this._filePath, "r");
-    for await (const line of handle.readLines()) {
-      try {
-        const event = JSON.parse(line) as SharedThreadEvent;
-        yield event;
-      } catch (err) {
-        console.error(`Error parsing line: ${line}`);
-      }
-    }
-  }
-
-  newClient(clientId: string) {
-    this._logger.log(`New client: ${clientId}`);
-    return new SharedThreadClient(clientId, this);
-  }
-
   destroy() {
     this._abortController.abort();
     this._logUnsubscribe();
     this._logAppendQueue.then(handle => handle.close());
     this._fileAppendQueue.then(handle => handle.close());
-  }
-}
-
-export class SharedThreadClient {
-  clientId: string;
-  thread: SharedThread;
-
-  private _unsubscribers: Unsubscribe[] = [];
-
-  constructor(clientId: string, thread: SharedThread) {
-    this.clientId = clientId;
-    this.thread = thread;
-  }
-
-  sendPrompt(input: Input, options: TurnOptions = {}) {
-    // @ts-ignore - accessing private method
-    this.thread.queueInput(input, this.clientId, options);
-  }
-
-  sendAbortSignal() {
-    // @ts-ignore - accessing private method
-    this.thread.abort(this.clientId);
-  }
-
-  subscribe(callback: (event: SharedThreadEvent) => void) {
-    // @ts-ignore - _pubsub is private but we need to subscribe to it
-    const unsubscribe = this.thread._pubsub.subscribe(callback);
-    this._unsubscribers.push(unsubscribe);
-    return unsubscribe;
-  }
-
-  destroy() {
-    this._unsubscribers.forEach(unsub => unsub());
-    this._unsubscribers = [];
   }
 }
 

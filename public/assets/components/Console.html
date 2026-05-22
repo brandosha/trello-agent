@@ -84,23 +84,6 @@
         this.api.onMessage((message) => this.handleMessage(message));
         this.loadDraftApiKey();
 
-        const pendingToken = app.consumePendingToken?.();
-        if (pendingToken) {
-          if (this.configured) {
-            this.api.sendTrelloAuth({ token: pendingToken });
-          } else {
-            const apiKey = this.apiKeyInput || window.localStorage.getItem('trelloAgentApiKeyDraft');
-            const apiSecret = this.apiSecretInput || window.localStorage.getItem('trelloAgentApiSecretDraft');
-            if (!apiKey || !apiSecret) {
-              this.errorMessage = 'API key and secret are required to finish setup.';
-              return;
-            }
-            this.api.sendTrelloSetup({ apiKey, secret: apiSecret, token: pendingToken });
-            window.localStorage.removeItem('trelloAgentApiKeyDraft');
-            window.localStorage.removeItem('trelloAgentApiSecretDraft');
-          }
-        }
-
         if (this.isAdmin) {
           this.api.requestPermissions();
         }
@@ -129,6 +112,21 @@
         });
       },
       handleMessage(message) {
+        if (message?.type === 'trello.status' && !message.configured) {
+          const pendingToken = app.consumePendingToken?.();
+          if (pendingToken) {
+            const apiKey = this.apiKeyInput || window.localStorage.getItem('trelloAgentApiKeyDraft');
+            const apiSecret = this.apiSecretInput || window.localStorage.getItem('trelloAgentApiSecretDraft');
+            if (!apiKey || !apiSecret) {
+              this.errorMessage = 'API key and secret are required to finish setup.';
+              return;
+            }
+            this.api.sendTrelloSetup({ apiKey, secret: apiSecret, token: pendingToken });
+            window.localStorage.removeItem('trelloAgentApiKeyDraft');
+            window.localStorage.removeItem('trelloAgentApiSecretDraft');
+          }
+        }
+
         if (message?.type === 'error') {
           this.errorMessage = message.error || 'Unknown error.';
         }

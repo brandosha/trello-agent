@@ -4,19 +4,67 @@ import { WebSocket } from "ws";
 import { z } from "zod";
 
 import { generateAuthToken, verifyAuthToken } from "./auth.js";
-import { codex, SharedThreadClient } from "./codex.js";
+import { codex, SharedThread } from "./codex.js";
 import { logger } from "./Logger.js";
 import { trelloIsConfigured, getTrelloMember, setTrelloConfig, getTrelloApiKey } from "./trello.js";
-import { hasPermission, listPermissions, getPermissions, setPermissions, UserPermission } from "./permissions.js";
+import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
+import { Unsubscribe } from "./PubSub.js";
 
-interface ClientContext {
-  codexClients: Map<string, SharedThreadClient>;
+type WsMessage<T> = {
+  type: string
+} & T
+
+class WsClient {
+  ws: WSContext<WebSocket>;
   email?: string;
-  codexLoginProcess?: ChildProcessWithoutNullStreams;
+  permissions?: UserPermissions
+  private _unsubscribePermissions?: Unsubscribe;
+  codexThreads = new Map<string, SharedThread>();
+
+  constructor(ws: WSContext<WebSocket>) {
+    this.ws = ws;
+    trelloIsConfigured().then(configured => {
+      this.send({
+        type: "trello.status",
+        configured,
+      })
+    })
+  }
+
+  send<T>(message: WsMessage<T>) {
+    this.ws.send(JSON.stringify(message));
+  }
+
+  setEmail(email: string) {
+    this.email = email;
+    this.permissions = permissions.forUser(email);
+    this.send({
+      type: 'auth.success',
+      email,
+    })
+
+    this._unsubscribePermissions?.();
+    this._unsubscribePermissions = this.permissions.subscribe((perms) => this.send({
+      type: 'auth.permissions',
+      permissions: perms,
+    }))
+  }
+
+  async checkPermissions(perms: UserPermission[]) {
+    if (!this.permissions) {
+      throw new WsError("UNAUTHORIZED", "Not authenticated.");
+    }
+
+    for (const perm of perms) {
+      if (!await this.permissions.has(perm)) {
+        throw new WsError("FORBIDDEN", `Missing required permission: ${perm}`);
+      }
+    }
+  }
 }
 
-type WsMessageHandler = (client: ClientContext, message: any, ws: WSContext<WebSocket>, event: Event) => void | Promise<void>;
+type WsMessageHandler = (message: any, client: WsClient, event: Event) => void | Promise<void>;
 
 class WsError extends Error {
   code: string;
@@ -26,36 +74,36 @@ class WsError extends Error {
   }
 }
 
-function wsEndpoint<T>(schema: z.ZodSchema<T>, handler: (client: ClientContext, message: T, ws: WSContext<WebSocket>, event: Event) => void | Promise<void>): WsMessageHandler {
-  return async (client, message, ws, event) => {
+function wsEndpoint<T>(schema: z.ZodSchema<T>, handler: (message: T, client: WsClient, event: Event) => void | Promise<void>): WsMessageHandler {
+  return async (message, client, event) => {
     let parsed: T;
     try {
       parsed = schema.parse(message);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        ws.send(JSON.stringify({
+        client.send({
           type: "error",
           code: "INVALID_MESSAGE",
           message: "Invalid message format.",
           err,
-        }));
+        });
         return;
       }
       throw err;
     }
 
     try {
-      await handler(client, parsed, ws, event);
+      await handler(parsed, client, event);
     } catch (err) {
       if (err instanceof WsError) {
-        ws.send(JSON.stringify({
+        client.send({
           type: "error",
           code: err.code,
           message: err.message,
-        }));
-        return;
+        });
+      } else {
+        throw err;
       }
-      throw err;
     }
   }
 }
@@ -67,7 +115,7 @@ const trelloSetupSchema = z.object({
   token: z.string(),
 });
 
-const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (client, message, ws) => {
+const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (message, client) => {
   const { apiKey, secret, token } = message;
 
   if (await trelloIsConfigured()) {
@@ -82,15 +130,15 @@ const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (client, message
 
   const { email } = await getTrelloMember(token);
 
-  client.email = email;
-  ws.send(JSON.stringify({ type: "trello.setup.success" }));
-  await setPermissions(email, ['*']);
+  client.setEmail(email);
+  client.send({ type: "trello.setup.success" });
+  permissions.forUser(email).set(['*']);
 
   const authToken = await generateAuthToken({ email });
-  ws.send(JSON.stringify({
+  client.send({
     type: "auth",
     authToken,
-  }));
+  });
 });
 
 
@@ -99,7 +147,7 @@ const trelloAuthSchema = z.object({
   token: z.string(),
 });
 
-const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (client, message, ws) => {
+const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (message, client) => {
   const { token } = message;
 
   if (!await trelloIsConfigured()) {
@@ -107,21 +155,22 @@ const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (client, message, 
   }
 
   const { email } = await getTrelloMember(token);
-  client.email = email;
+  client.setEmail(email);
 
   const authToken = await generateAuthToken({ email });
-  ws.send(JSON.stringify({
+  client.send({
     type: "auth",
     authToken,
-  }));
+  });
 });
+
 
 const authMessageSchema = z.object({
   type: z.literal("auth"),
   authToken: z.string().optional(),
 });
 
-const authEndpoint = wsEndpoint(authMessageSchema, async (client, message, ws) => {
+const authEndpoint = wsEndpoint(authMessageSchema, async (message, client) => {
   if (!await trelloIsConfigured()) {
     throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
   }
@@ -129,10 +178,10 @@ const authEndpoint = wsEndpoint(authMessageSchema, async (client, message, ws) =
   console.log("Received auth message:", message);
 
   if (!message.authToken) {
-    ws.send(JSON.stringify({
+    client.send({
       type: "trello.auth.request",
       key: await getTrelloApiKey(),
-    }));
+    });
     return;
   } else {
     try {
@@ -140,47 +189,25 @@ const authEndpoint = wsEndpoint(authMessageSchema, async (client, message, ws) =
       if (typeof payload.email !== "string") {
         throw new WsError("INVALID_TOKEN", "Invalid auth token payload.");
       }
-      client.email = payload.email;
+      client.setEmail(payload.email);
     } catch (err) {
       console.error("Failed to verify auth token:", err);
-      ws.send(JSON.stringify({
+      client.send({
         type: "trello.auth.request",
         key: await getTrelloApiKey(),
-      }));
+      });
       throw new WsError("INVALID_TOKEN", "Failed to verify auth token.");
     }
   }
-
-  ws.send(JSON.stringify({
-    type: "auth.success",
-    email: client.email,
-  }));
-
-  ws.send(JSON.stringify({
-    type: "auth.permissions",
-    permissions: await getPermissions(client.email),
-  }));
 });
-
-async function checkPermissions(client: ClientContext, permission: UserPermission[]) {
-  if (!client.email) {
-    throw new WsError("UNAUTHORIZED", "Not authenticated.");
-  }
-
-  for (const perm of permission) {
-    if (!await hasPermission(client.email, perm)) {
-      throw new WsError("FORBIDDEN", `Missing required permission: ${perm}`);
-    }
-  }
-}
 
 const threadCreateSchema = z.object({
   type: z.literal("thread.create"),
   threadId: z.string(),
 });
 
-const threadCreateEndpoint = wsEndpoint(threadCreateSchema, async (client, message, ws) => {
-  await checkPermissions(client, ['thread.create']);
+const threadCreateEndpoint = wsEndpoint(threadCreateSchema, async (message, client) => {
+  await client.checkPermissions(['thread.create']);
 
   const { threadId } = message;
   const exists = await codex.threadExists(threadId);
@@ -189,7 +216,7 @@ const threadCreateEndpoint = wsEndpoint(threadCreateSchema, async (client, messa
   }
 
   await codex.thread(threadId);
-  ws.send(JSON.stringify({ type: "thread.created", threadId }));
+  client.send({ type: "thread.created", threadId });
 });
 
 
@@ -198,12 +225,12 @@ const subscribeMessageSchema = z.object({
   threadId: z.string(),
 });
 
-const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (client, message, ws) => {
+const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, client) => {
   const { threadId } = message;
 
-  await checkPermissions(client, ['thread.view']);
+  await client.checkPermissions(['thread.view']);
 
-  if (client.codexClients.has(threadId)) {
+  if (client.codexThreads.has(threadId)) {
     throw new WsError("ALREADY_SUBSCRIBED", `Already subscribed to thread ${threadId}.`);
   }
 
@@ -214,24 +241,24 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (client, mess
   }
 
   const thread = codex.thread(message.threadId);
-  const clientInstance = thread.newClient(client.email!);
-  client.codexClients.set(threadId, clientInstance);
+  // const clientInstance = thread.newClient(client.email!);
+  client.codexThreads.set(threadId, thread);
 
-  clientInstance.subscribe(event => {
-    ws.send(JSON.stringify({
+  thread.subscribe(event => {
+    client.send({
       type: "thread.event",
       threadId,
       event
-    }));
+    });
   });
 
-  for await (const pastEvent of thread.pastEvents()) {
-    ws.send(JSON.stringify({
-      type: "thread.event",
-      threadId,
-      event: pastEvent
-    }));
-  }
+  // for await (const pastEvent of thread.pastEvents()) {
+  //   ws.send(JSON.stringify({
+  //     type: "thread.event",
+  //     threadId,
+  //     event: pastEvent
+  //   }));
+  // }
 });
 
 const abortMessageSchema = z.object({
@@ -239,17 +266,12 @@ const abortMessageSchema = z.object({
   threadId: z.string(),
 });
 
-const abortEndpoint = wsEndpoint(abortMessageSchema, async (client, message, ws) => {
+const abortEndpoint = wsEndpoint(abortMessageSchema, async (message, client) => {
   const { threadId } = message;
 
-  await checkPermissions(client, ['thread.abort']);
+  await client.checkPermissions(['thread.abort']);
 
-  const clientInstance = client.codexClients.get(threadId);
-  if (!clientInstance) {
-    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}`);
-  }
-
-  clientInstance.sendAbortSignal();
+  codex.thread(threadId).abort(client.email ?? "unk");
 });
 
 const promptMessageSchema = z.object({
@@ -258,39 +280,31 @@ const promptMessageSchema = z.object({
   prompt: z.string(),
 });
 
-const promptEndpoint = wsEndpoint(promptMessageSchema, async (client, message, ws) => {
+const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) => {
   const { threadId, prompt } = message;
 
-  await checkPermissions(client, ['thread.prompt']);
+  await client.checkPermissions(['thread.prompt']);
 
-  const clientInstance = client.codexClients.get(threadId);
-  if (!clientInstance) {
-    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}`);
-  }
-
-  clientInstance.sendPrompt(prompt);
+  codex.thread(threadId).queueInput(prompt, client.email ?? 'unk')
 });
-
-
 
 const permissionsSetSchema = z.object({
   type: z.literal("permissions.set"),
-  memberId: z.string(),
+  email: z.string(),
   permissions: z.array(z.string()),
 });
 
-const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (client, message, ws) => {
-  await checkPermissions(client, ['admin']);
+const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
 
-  const permissions = Array.from(new Set(
+  const newPermissions = Array.from(new Set(
     message.permissions
       .map((permission) => permission.trim())
       .filter(Boolean)
   )) as UserPermission[];
 
   try {
-    await setPermissions(message.memberId, permissions);
-    ws.send(JSON.stringify({ type: "permissions.updated", permissions }));
+    await permissions.forUser(message.email).set(newPermissions);
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new WsError("INVALID_PERMISSIONS", "Invalid permissions format.");
@@ -306,10 +320,25 @@ const permissionsListSchema = z.object({
   type: z.literal("permissions.list"),
 });
 
-const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (client, message, ws) => {
-  await checkPermissions(client, ['admin']);
-  const permissions = await listPermissions();
-  ws.send(JSON.stringify({ type: "permissions.list", permissions }));
+const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+  
+  const allPermissions = await permissions.all();
+  const jsonPermissions: Record<string, UserPermission[] | undefined> = {};
+  Object.entries(allPermissions).forEach(([email, perms]) => {
+    perms?.subscribe(p => client.send({
+      type: "permissions.value",
+      email,
+      permissions: p
+    }))
+    jsonPermissions[email] = perms?.value;
+  });
+  // const permissions = await listPermissions();
+  // TODO: Remove this and update client side to handle 
+  client.send({
+    type: "permissions.list",
+    permissions: jsonPermissions
+  });
 });
 
 
@@ -317,51 +346,54 @@ const codexLoginSchema = z.object({
   type: z.literal("codex.login"),
 });
 
-const codexLoginEndpoint = wsEndpoint(codexLoginSchema, async (client, message, ws) => {
-  await checkPermissions(client, ['admin']);
+let codexLoginProcess: ChildProcessWithoutNullStreams | undefined
 
-  if (client.codexLoginProcess && !client.codexLoginProcess.killed) {
+const codexLoginEndpoint = wsEndpoint(codexLoginSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+
+  if (codexLoginProcess && !codexLoginProcess.killed) {
     throw new WsError("PROCESS_RUNNING", "Codex login is already running.");
   }
 
   const child = spawn("codex", ["login", "--device-auth"], {
     env: process.env,
+    timeout: 600000
   });
-  client.codexLoginProcess = child;
+  codexLoginProcess = child;
 
-  ws.send(JSON.stringify({ type: "codex.login.started" }));
+  client.send({ type: "codex.login.started" });
 
   child.stdout.on("data", (data) => {
-    ws.send(JSON.stringify({
+    client.send({
       type: "codex.login.output",
       stream: "stdout",
       text: data.toString(),
-    }));
+    });
   });
 
   child.stderr.on("data", (data) => {
-    ws.send(JSON.stringify({
+    client.send({
       type: "codex.login.output",
       stream: "stderr",
       text: data.toString(),
-    }));
+    });
   });
 
   child.on("error", (err) => {
-    client.codexLoginProcess = undefined;
-    ws.send(JSON.stringify({
+    codexLoginProcess = undefined;
+    client.send({
       type: "codex.login.error",
       message: err.message,
-    }));
+    });
   });
 
   child.on("close", (code, signal) => {
-    client.codexLoginProcess = undefined;
-    ws.send(JSON.stringify({
+    codexLoginProcess = undefined;
+    client.send({
       type: "codex.login.exit",
       code,
       signal,
-    }));
+    });
   });
 });
 
@@ -369,30 +401,16 @@ const codexLoginStopSchema = z.object({
   type: z.literal("codex.login.stop"),
 });
 
-const codexLoginStopEndpoint = wsEndpoint(codexLoginStopSchema, async (client, message, ws) => {
-  await checkPermissions(client, ['admin']);
+const codexLoginStopEndpoint = wsEndpoint(codexLoginStopSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
 
-  if (!client.codexLoginProcess || client.codexLoginProcess.killed) {
+  if (!codexLoginProcess || codexLoginProcess.killed) {
     throw new WsError("NO_PROCESS", "Codex login is not running.");
   }
 
-  client.codexLoginProcess.kill("SIGTERM");
-  ws.send(JSON.stringify({ type: "codex.login.stopped" }));
+  codexLoginProcess.kill("SIGTERM");
+  client.send({ type: "codex.login.stopped" });
 });
-
-
-// const messageSchema = z.union([
-//   subscribeMessageSchema,
-//   abortMessageSchema,
-//   promptMessageSchema,
-//   authMessageSchema,
-//   trelloSetupSchema,
-//   trelloAuthSchema,
-//   trelloPermissionsSetSchema,
-//   trelloPermissionsListSchema,
-//   trelloOAuthRequestSchema,
-//   threadCreateSchema,
-// ]);
 
 
 const endpoints: Record<string, WsMessageHandler> = {
@@ -412,14 +430,11 @@ const endpoints: Record<string, WsMessageHandler> = {
 
 export const websocketHandler = upgradeWebSocket(c => {
 
-  const codexClients = new Map<string, SharedThreadClient>();
-  const ctx: ClientContext = {
-    codexClients,
-    email: undefined,
-  };
+  let client: WsClient | undefined
 
   return {
     onOpen: (event, ws) => {
+      client = new WsClient(ws);
       void (async () => {
         const configured = await trelloIsConfigured();
         ws.send(JSON.stringify({
@@ -429,6 +444,10 @@ export const websocketHandler = upgradeWebSocket(c => {
       })();
     },
     onMessage: async (event, ws) => {
+      if (!client) {
+        return;
+      }
+
       let data: any;
       try {
         data = JSON.parse(event.data.toString());
@@ -453,7 +472,7 @@ export const websocketHandler = upgradeWebSocket(c => {
       }
 
       try {
-        await endpoint(ctx, data, ws, event);
+        await endpoint(data, client, event);
       } catch (err) {
         console.error(`Error handling message of type ${data.type}:`, err);
         ws.send(JSON.stringify({
@@ -466,10 +485,7 @@ export const websocketHandler = upgradeWebSocket(c => {
       return;
     },
     onClose: (event, ws) => {
-      if (ctx.codexLoginProcess && !ctx.codexLoginProcess.killed) {
-        ctx.codexLoginProcess.kill();
-        ctx.codexLoginProcess = undefined;
-      }
+      
     },
   }
 });

@@ -14,3 +14,36 @@ export class PubSub<EventType> {
     };
   }
 }
+
+export class HistorySub<T> extends PubSub<T> {
+  history: T[] = []
+
+  subscribe(callback: (event: T) => void): () => void {
+    this.history.forEach(ev => callback(ev));
+    return super.subscribe(callback)
+  }
+
+  publish(event: T): void {
+    this.history.push(event)
+    super.publish(event)
+  }
+}
+
+export class ValueSub<T> extends PubSub<T> {
+  value: T;
+
+  constructor(v: T) {
+    super()
+    this.value = v;
+  }
+
+  subscribe(callback: (event: T) => void): () => void {
+    callback(this.value);
+    return super.subscribe(callback);
+  }
+
+  set(v: T) {
+    this.value = v;
+    super.publish(v)
+  }
+}
