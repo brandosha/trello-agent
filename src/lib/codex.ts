@@ -3,13 +3,23 @@ import fs from "fs/promises";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
-import { dataDir } from "./paths.js";
+import { rootDir, dataDir } from "./paths.js";
 import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
 import { randomStr } from "./utils.js";
 
 
-const codexInterface = new Codex();
+const codexInterface = new Codex({
+  config: {
+    mcp_servers: {
+      'trello-agent': {
+        command: 'node',
+        args: [`${rootDir}/dist/src/mcp.js`],
+        default_tools_approval_mode: 'approve',
+      }
+    }
+  }
+});
 
 const threadsDir = `${dataDir}/threads`;
 if (!existsSync(threadsDir)) {

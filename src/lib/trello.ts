@@ -1,7 +1,6 @@
 import crypto from "crypto";
 import fs from "fs/promises";
 
-import { logger } from "./Logger.js";
 import { configDir, mkConfigDir } from "./paths.js";
 
 const trelloConfigPath = `${configDir}/trello.json`;
@@ -36,26 +35,58 @@ export async function setTrelloConfig(newConfig: TrelloConfig): Promise<void> {
   await fs.writeFile(trelloConfigPath, payload);
 }
 
-export async function getTrelloMember(token: string) {
+export async function makeTrelloApiRequest(endpoint: string, method: string = "GET", body?: any) {
   const config = await storedConfig;
   if (!config) {
     throw new Error("Trello configuration not found");
   }
 
-  const url = new URL(`https://api.trello.com/1/members/me`);
+  const url = new URL(`https://api.trello.com/1/${endpoint}`);
   url.searchParams.set("key", config.apiKey);
-  url.searchParams.set("token", token);
-  url.searchParams.set("fields", "id,email");
+  url.searchParams.set("token", config.token);
 
-  const response = await fetch(url.toString());
-  if (!response.ok) {
-    throw new Error(`Failed to fetch member info: ${response.status} ${response.statusText}`);
+  const options: RequestInit = {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  };
+
+  if (body) {
+    options.body = JSON.stringify(body);
   }
 
-  return await response.json() as {
-    id: string;
-    email: string;
-  };
+  const response = await fetch(url.toString(), options);
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Trello API request failed: ${response.status} ${response.statusText}`);
+  }
+
+  return await response.json();
+}
+
+export async function getTrelloMember(token: string) {
+  return await makeTrelloApiRequest(`members/me`, "GET");
+
+  // const config = await storedConfig;
+  // if (!config) {
+  //   throw new Error("Trello configuration not found");
+  // }
+
+  // const url = new URL(`https://api.trello.com/1/members/me`);
+  // url.searchParams.set("key", config.apiKey);
+  // url.searchParams.set("token", token);
+  // url.searchParams.set("fields", "id,email");
+
+  // const response = await fetch(url.toString());
+  // if (!response.ok) {
+  //   throw new Error(`Failed to fetch member info: ${response.status} ${response.statusText}`);
+  // }
+
+  // return await response.json() as {
+  //   id: string;
+  //   email: string;
+  // };
 }
 
 export async function getTrelloApiKey() {
