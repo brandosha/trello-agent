@@ -162,7 +162,7 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
       timestamp: new Date(),
     });
 
-    this._logger.log(`Queued input from ${from}: ${JSON.stringify(prompt)}`, "info");
+    this._logger.info(`Queued input from ${from}: ${JSON.stringify(prompt)}`);
 
     const promise = this._threadQueue.then(async (thread) => {
       const inputEvent: SharedThreadEvent = {

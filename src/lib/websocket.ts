@@ -6,7 +6,17 @@ import { z } from "zod";
 import { generateAuthToken, verifyAuthToken } from "./auth.js";
 import { codex, SharedThread } from "./codex.js";
 import { logger } from "./Logger.js";
-import { trelloIsConfigured, getTrelloMember, setTrelloConfig, getTrelloApiKey } from "./trello.js";
+import {
+  trelloIsConfigured,
+  getTrelloMember,
+  setTrelloConfig,
+  getTrelloApiKey,
+  listTrelloBoards,
+  listTrelloWebhooks,
+  createTrelloWebhook,
+  deleteTrelloWebhook,
+  getTrelloWebhookCallbackUrl,
+} from "./trello.js";
 import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
@@ -17,13 +27,15 @@ type WsMessage<T> = {
 
 class WsClient {
   ws: WSContext<WebSocket>;
+  origin: string | undefined;
   email?: string;
   permissions?: UserPermissions
   private _unsubscribePermissions?: Unsubscribe;
   codexThreads = new Map<string, SharedThread>();
 
-  constructor(ws: WSContext<WebSocket>) {
+  constructor(ws: WSContext<WebSocket>, origin: string | undefined) {
     this.ws = ws;
+    this.origin = origin;
     trelloIsConfigured().then(configured => {
       this.send({
         type: "trello.status",
@@ -121,11 +133,16 @@ const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (message, client
   if (await trelloIsConfigured()) {
     throw new WsError("TRELLO_ALREADY_CONFIGURED", "Trello is already configured.");
   }
+
+  if (!client.origin) {
+    throw new WsError("ORIGIN_REQUIRED", "Origin header is required for Trello setup.");
+  }
   
   await setTrelloConfig({
     apiKey,
     secret,
     token,
+    webhookOrigin: client.origin,
   });
 
   const { email } = await getTrelloMember(token);
@@ -174,8 +191,6 @@ const authEndpoint = wsEndpoint(authMessageSchema, async (message, client) => {
   if (!await trelloIsConfigured()) {
     throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
   }
-
-  console.log("Received auth message:", message);
 
   if (!message.authToken) {
     client.send({
@@ -341,6 +356,78 @@ const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message
   });
 });
 
+const trelloBoardsListSchema = z.object({
+  type: z.literal("trello.boards.list"),
+});
+
+const trelloBoardsListEndpoint = wsEndpoint(trelloBoardsListSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+
+  try {
+    const boards = await listTrelloBoards();
+    client.send({
+      type: "trello.boards.list",
+      boards,
+    });
+  } catch (err: any) {
+    throw new WsError("TRELLO_API_ERROR", err?.message || "Failed to load Trello boards.");
+  }
+});
+
+const trelloWebhooksListSchema = z.object({
+  type: z.literal("trello.webhooks.list"),
+});
+
+const trelloWebhooksListEndpoint = wsEndpoint(trelloWebhooksListSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+
+  try {
+    const webhooks = await listTrelloWebhooks();
+    client.send({
+      type: "trello.webhooks.list",
+      webhooks,
+    });
+  } catch (err: any) {
+    throw new WsError("TRELLO_API_ERROR", err?.message || "Failed to load Trello webhooks.");
+  }
+});
+
+const trelloWebhooksSetSchema = z.object({
+  type: z.literal("trello.webhooks.set"),
+  boardId: z.string(),
+  enabled: z.boolean(),
+});
+
+const trelloWebhooksSetEndpoint = wsEndpoint(trelloWebhooksSetSchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+
+  try {
+    const { boardId, enabled } = message;
+    const webhooks = await listTrelloWebhooks();
+    const matching = webhooks.filter((hook) => hook.idModel === boardId);
+
+    if (enabled) {
+      if (!matching.length) {
+        await createTrelloWebhook({
+          idModel: boardId,
+          description: `Trello Agent: ${boardId}`,
+          callbackURL: await getTrelloWebhookCallbackUrl(),
+        });
+      }
+    } else {
+      await Promise.all(matching.map((hook) => deleteTrelloWebhook(hook.id)));
+    }
+
+    const refreshed = await listTrelloWebhooks();
+    client.send({
+      type: "trello.webhooks.list",
+      webhooks: refreshed,
+    });
+  } catch (err: any) {
+    throw new WsError("TRELLO_API_ERROR", err?.message || "Failed to update Trello webhooks.");
+  }
+});
+
 
 const codexLoginSchema = z.object({
   type: z.literal("codex.login"),
@@ -417,6 +504,9 @@ const endpoints: Record<string, WsMessageHandler> = {
   "auth": authEndpoint,
   "trello.setup": trelloSetupEndpoint,
   "trello.auth": trelloAuthEndpoint,
+  "trello.boards.list": trelloBoardsListEndpoint,
+  "trello.webhooks.list": trelloWebhooksListEndpoint,
+  "trello.webhooks.set": trelloWebhooksSetEndpoint,
   "thread.create": threadCreateEndpoint,
   "thread.subscribe": subscribeEndpoint,
   "thread.prompt": promptEndpoint,
@@ -434,7 +524,7 @@ export const websocketHandler = upgradeWebSocket(c => {
 
   return {
     onOpen: (event, ws) => {
-      client = new WsClient(ws);
+      client = new WsClient(ws, c.req.header("origin"));
     },
     onMessage: async (event, ws) => {
       if (!client) {

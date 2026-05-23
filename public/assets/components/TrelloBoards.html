@@ -1,0 +1,91 @@
+<template id="trello-boards-template">
+  <section class="panel" @vue:mounted="mounted">
+    <div class="panel-header">
+      <div>Trello boards</div>
+      <div class="badge" v-if="loadingBoards || loadingWebhooks">Loading...</div>
+    </div>
+    <div class="panel-body stack">
+      <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+      <div v-if="boards.length === 0" class="badge">No boards loaded.</div>
+      <div v-else class="stack">
+        <div v-for="board in boards" :key="board.id" class="input-row">
+          <div class="label">{{ board.name }}</div>
+          <label class="badge">
+            <input
+              type="checkbox"
+              :checked="isWebhookEnabled(board.id)"
+              :disabled="loadingWebhooks"
+              @change="toggleWebhook(board.id)"
+            />
+            Webhook enabled
+          </label>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+<script>
+  function TrelloBoards() {
+    return PetiteVue.reactive({
+      $template: '#trello-boards-template',
+      backend: null,
+      boards: [],
+      webhooksByBoard: {},
+      loadingBoards: false,
+      loadingWebhooks: false,
+      errorMessage: '',
+      mounted() {
+        this.backend = app.backend;
+        if (!this.backend) return;
+
+        this.backend.listen('trello.boards.list', ({ boards }) => {
+          this.boards = Array.isArray(boards) ? boards : [];
+          this.loadingBoards = false;
+        });
+
+        this.backend.listen('trello.webhooks.list', ({ webhooks }) => {
+          this.webhooksByBoard = this.groupWebhooks(webhooks || []);
+          this.loadingWebhooks = false;
+        });
+
+        this.backend.listen('error', (message) => {
+          if (message?.code && message.code.startsWith('TRELLO')) {
+            this.errorMessage = message.message || 'Failed to load Trello data.';
+            this.loadingBoards = false;
+            this.loadingWebhooks = false;
+          }
+        });
+
+        this.refresh();
+      },
+      refresh() {
+        if (!this.backend) return;
+        this.loadingBoards = true;
+        this.loadingWebhooks = true;
+        this.backend.send('trello.boards.list');
+        this.backend.send('trello.webhooks.list');
+      },
+      groupWebhooks(webhooks) {
+        const byBoard = {};
+        webhooks.forEach((hook) => {
+          if (!hook || !hook.idModel) return;
+          if (!byBoard[hook.idModel]) {
+            byBoard[hook.idModel] = [];
+          }
+          byBoard[hook.idModel].push(hook);
+        });
+        return byBoard;
+      },
+      isWebhookEnabled(boardId) {
+        const hooks = this.webhooksByBoard[boardId] || [];
+        return hooks.length > 0;
+      },
+      toggleWebhook(boardId) {
+        if (!this.backend) return;
+        const enabled = !this.isWebhookEnabled(boardId);
+        this.loadingWebhooks = true;
+        this.backend.send('trello.webhooks.set', { boardId, enabled });
+      },
+    });
+  }
+</script>

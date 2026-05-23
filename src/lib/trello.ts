@@ -9,6 +9,7 @@ export interface TrelloConfig {
   apiKey: string;
   secret: string;
   token: string;
+  webhookOrigin: string;
 }
 
 async function readTrelloConfig() {
@@ -28,17 +29,23 @@ export async function trelloIsConfigured(): Promise<boolean> {
   return !!(config?.apiKey && config?.secret && config?.token);
 }
 
+async function getTrelloConfig(): Promise<TrelloConfig> {
+  const config = await storedConfig;
+  if (!config) {
+    throw new Error("Trello configuration not found");
+  }
+  return config;
+}
+
 export async function setTrelloConfig(newConfig: TrelloConfig): Promise<void> {
   const payload = JSON.stringify(newConfig, null, 2);
   storedConfig = Promise.resolve(newConfig);
   await fs.writeFile(trelloConfigPath, payload);
 }
 
+export const TRELLO_CLIENT_IDENTIFIER = "Trello Agent";
 export async function makeTrelloApiRequest(endpoint: string, method: string = "GET", body?: any) {
-  const config = await storedConfig;
-  if (!config) {
-    throw new Error("Trello configuration not found");
-  }
+  const config = await getTrelloConfig();
 
   const url = new URL(`https://api.trello.com/1/${endpoint}`);
   url.searchParams.set("key", config.apiKey);
@@ -48,6 +55,7 @@ export async function makeTrelloApiRequest(endpoint: string, method: string = "G
     method,
     headers: {
       "Content-Type": "application/json",
+      "X-Trello-Client-Identifier": TRELLO_CLIENT_IDENTIFIER
     },
   };
 
@@ -58,7 +66,7 @@ export async function makeTrelloApiRequest(endpoint: string, method: string = "G
   const response = await fetch(url.toString(), options);
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Trello API request failed: ${response.status} ${response.statusText}`);
+    throw new Error(`Trello API request failed: ${response.status} ${response.statusText}\n${errorText}`);
   }
 
   return await response.json();
@@ -66,26 +74,6 @@ export async function makeTrelloApiRequest(endpoint: string, method: string = "G
 
 export async function getTrelloMember(token: string) {
   return await makeTrelloApiRequest(`members/me`, "GET");
-
-  // const config = await storedConfig;
-  // if (!config) {
-  //   throw new Error("Trello configuration not found");
-  // }
-
-  // const url = new URL(`https://api.trello.com/1/members/me`);
-  // url.searchParams.set("key", config.apiKey);
-  // url.searchParams.set("token", token);
-  // url.searchParams.set("fields", "id,email");
-
-  // const response = await fetch(url.toString());
-  // if (!response.ok) {
-  //   throw new Error(`Failed to fetch member info: ${response.status} ${response.statusText}`);
-  // }
-
-  // return await response.json() as {
-  //   id: string;
-  //   email: string;
-  // };
 }
 
 export async function getTrelloApiKey() {
@@ -93,12 +81,67 @@ export async function getTrelloApiKey() {
   return config?.apiKey;
 }
 
-export function verifyTrelloWebhookRequest(request: any, secret: string, callbackURL: string) {
-  var base64Digest = function (s: string) {
-    return crypto.createHmac("sha1", secret).update(s).digest("base64");
-  };
-  var content = JSON.stringify(request.body) + callbackURL;
-  var doubleHash = base64Digest(content);
-  var headerHash = request.headers["x-trello-webhook"];
-  return doubleHash == headerHash;
+export interface TrelloBoard {
+  id: string;
+  name: string;
+  closed?: boolean;
+}
+
+export async function listTrelloBoards(): Promise<TrelloBoard[]> {
+  const boards = await makeTrelloApiRequest("members/me/boards?fields=id,name,closed", "GET");
+  return Array.isArray(boards) ? boards.filter((board) => !board.closed) : [];
+}
+
+export const TRELLO_WEBHOOK_ROUTE = "/hook/trello";
+export async function getTrelloWebhookCallbackUrl() {
+  const config = await storedConfig;
+  if (!config?.webhookOrigin) {
+    throw new Error("Trello webhook host is not configured");
+  }
+
+  return `${config.webhookOrigin}${TRELLO_WEBHOOK_ROUTE}`;
+}
+
+export interface TrelloWebhook {
+  id: string;
+  idModel: string;
+  callbackURL: string;
+  description?: string;
+  active?: boolean;
+}
+
+export async function listTrelloWebhooks(): Promise<TrelloWebhook[]> {
+  const config = await getTrelloConfig();
+  return await makeTrelloApiRequest(`tokens/${config.token}/webhooks`, "GET");
+}
+
+export async function createTrelloWebhook(payload: {
+  idModel: string;
+  description: string;
+  callbackURL: string;
+}): Promise<TrelloWebhook> {
+  return await makeTrelloApiRequest("webhooks", "POST", payload);
+}
+
+export async function deleteTrelloWebhook(webhookId: string): Promise<void> {
+  await makeTrelloApiRequest(`webhooks/${webhookId}`, "DELETE");
+}
+
+export interface TrelloWebhookRequest {
+  bodyStr: string;
+  body: any;
+  headers: Record<string, string>;
+}
+
+export async function verifyTrelloWebhookRequest(request: TrelloWebhookRequest) {
+  const { secret } = await getTrelloConfig();
+  const callbackURL = await getTrelloWebhookCallbackUrl();
+
+  const expectedHash =
+    crypto.createHmac("sha1", secret)
+    .update(request.bodyStr)
+    .update(callbackURL)
+    .digest("base64");
+  const headerHash = request.headers["x-trello-webhook"];
+  return expectedHash === headerHash;
 }

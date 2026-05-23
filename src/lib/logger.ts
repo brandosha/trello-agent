@@ -12,7 +12,7 @@ interface LogMessage {
 }
 
 export class Logger extends PubSub<LogMessage> {
-  log(message: string, level: LogLevel = "info") {
+  log(level: LogLevel, message: string) {
     const logMessage: LogMessage = {
       timestamp: new Date(),
       level,
@@ -22,12 +22,16 @@ export class Logger extends PubSub<LogMessage> {
     this.publish(logMessage);
   }
 
+  info(message: string) {
+    this.log("info", message);
+  }
+
   warn(message: string) {
-    this.log(message, "warn");
+    this.log("warn", message);
   }
 
   error(message: string) {
-    this.log(message, "error");
+    this.log("error", message);
   }
 }
 
