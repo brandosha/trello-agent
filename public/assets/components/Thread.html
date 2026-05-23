@@ -11,8 +11,8 @@
         <div class="panel-header">
           <div class="badge" :style="{ color: connectionColor }">{{ connectionStatus }}</div>
           <div class="filters">
-            <input v-model="filterText" type="text" placeholder="Filter text" />
-            <select v-model="filterType">
+            <input v-model="filterText" type="text" placeholder="Filter text" @input="applyFilters" />
+            <select v-model="filterType" @change="applyFilters">
               <option value="">All types</option>
               <option v-for="type in typeOptions" :key="type" :value="type">{{ type }}</option>
             </select>
@@ -81,9 +81,9 @@
 </template>
 <script>
   function Thread(threadId) {
-    return {
+    return PetiteVue.reactive({
       $template: '#thread-template',
-      api: null,
+      backend: null,
       threadId,
       threadLabel: '(loading...)',
       connectionStatus: 'Connecting...',
@@ -93,50 +93,55 @@
       autoscroll: true,
       typeOptions: [],
       events: [],
+      filteredEvents: [],
       inputCount: 0,
       errorCount: 0,
       promptInput: '',
       subscribed: false,
+      connected: false,
+      authorized: false,
+      canView: false,
+      canPrompt: false,
+      canAbort: false,
+      totalEvents: 0,
+      lastEventTime: '--',
       mounted() {
         this.threadLabel = this.threadId || '(none)';
-        this.api = app.api;
-        if (!this.api) return;
+        this.backend = app.backend;
+        if (!this.backend) return;
 
-        this.api.onOpen(() => this.setConnection('Connected', 'var(--ok)'));
-        this.api.onClose(() => this.setConnection('Disconnected', 'var(--warn)'));
-        this.api.onError(() => this.setConnection('Error', 'var(--err)'));
+        this.backend.listen('error', () => this.setConnection('Error', 'var(--err)'));
+        this.backend.listen('auth.permissions', () => this.handleAuthUpdate());
+        this.backend.listen('auth.success', () => this.handleAuthUpdate());
 
-        this.api.onMessage((message) => this.handleMessage(message));
-
+        this.syncAuthState();
+        this.applyFilters();
+        this.syncEventStats();
         this.subscribeToThread();
-      },
-      get authorized() {
-        return app.user.authorized;
-      },
-      get canView() {
-        return app.hasPermission ? app.hasPermission('thread.view') : false;
-      },
-      get canPrompt() {
-        return app.hasPermission ? app.hasPermission('thread.prompt') : false;
-      },
-      get canAbort() {
-        return app.hasPermission ? app.hasPermission('thread.abort') : false;
       },
       setConnection(status, color) {
         this.connectionStatus = status;
         this.connectionColor = color;
       },
-      get totalEvents() {
-        return this.events.length;
+      syncAuthState() {
+        const auth = this.backend?.auth;
+        this.authorized = !!auth?.email;
+        this.canView = auth?.hasPermission ? auth.hasPermission('thread.view') : false;
+        this.canPrompt = auth?.hasPermission ? auth.hasPermission('thread.prompt') : false;
+        this.canAbort = auth?.hasPermission ? auth.hasPermission('thread.abort') : false;
       },
-      get lastEventTime() {
-        if (!this.events.length) return '--';
-        return this.events[this.events.length - 1].timeLabel || '--';
+      syncEventStats() {
+        this.totalEvents = this.events.length;
+        if (!this.events.length) {
+          this.lastEventTime = '--';
+          return;
+        }
+        this.lastEventTime = this.events[this.events.length - 1].timeLabel || '--';
       },
-      get filteredEvents() {
+      applyFilters() {
         const text = this.filterText.trim().toLowerCase();
         const type = this.filterType;
-        return this.events.filter((event) => {
+        this.filteredEvents = this.events.filter((event) => {
           const matchesText = !text || event.searchText.includes(text);
           const matchesType = !type || event.type === type;
           return matchesText && matchesType;
@@ -144,28 +149,28 @@
       },
       sendPrompt() {
         const input = this.promptInput.trim();
-        if (!input || !this.api || !this.canPrompt) return;
-        this.api.sendPrompt(this.threadId, input);
+        if (!input || !this.backend || !this.canPrompt) return;
+        this.backend.send('thread.prompt', { threadId: this.threadId, prompt: input });
         this.promptInput = '';
       },
       sendAbort() {
-        if (!this.api || !this.canAbort) return;
-        this.api.abort(this.threadId);
+        if (!this.backend || !this.canAbort) return;
+        this.backend.send('thread.abort', { threadId: this.threadId });
       },
-      handleMessage(message) {
-        console.log('Received message in thread:', message);
-        if (message?.type === 'auth.permissions' || message?.type === 'auth.success') {
-          this.subscribeToThread();
-        }
+      handleAuthUpdate() {
+        this.syncAuthState();
+        this.subscribeToThread();
       },
       subscribeToThread() {
-        if (this.subscribed || !this.api || !this.authorized || !this.canView) return;
+        if (this.subscribed || !this.backend || !this.authorized || !this.canView) return;
         this.subscribed = true;
-        this.api.subscribe(this.threadId, (message) => {
-          this.handleEvent(message);
-        });
+        this.backend.subscribeThread(this.threadId, (message) => this.handleEvent(message));
       },
       handleEvent(message) {
+        if (!this.connected) {
+          this.connected = true;
+          this.setConnection('Connected', 'var(--ok)');
+        }
         const payload = this.getEventPayload(message);
         const type = payload?.type || message?.type || 'event';
         const tone = this.classifyEvent(message);
@@ -192,6 +197,9 @@
         if (payload?.type) this.addTypeOption(payload.type);
         if (payload?.type === 'input.prompt') this.inputCount += 1;
         if (tone === 'err') this.errorCount += 1;
+
+        this.syncEventStats();
+        this.applyFilters();
 
         if (this.autoscroll) {
           setTimeout(() => {
@@ -272,6 +280,6 @@
       generateLocalId() {
         return Math.random().toString(36).slice(2, 8);
       },
-    };
+    });
   }
 </script>

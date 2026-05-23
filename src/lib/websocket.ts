@@ -435,13 +435,6 @@ export const websocketHandler = upgradeWebSocket(c => {
   return {
     onOpen: (event, ws) => {
       client = new WsClient(ws);
-      void (async () => {
-        const configured = await trelloIsConfigured();
-        ws.send(JSON.stringify({
-          type: "trello.status",
-          configured,
-        }));
-      })();
     },
     onMessage: async (event, ws) => {
       if (!client) {

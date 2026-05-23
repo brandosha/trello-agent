@@ -68,41 +68,98 @@
 </template>
 <script>
   function Console() {
-    return {
+    return PetiteVue.reactive({
       $template: '#console-template',
-      api: null,
+      backend: null,
       apiKeyInput: '',
       apiSecretInput: '',
       statusMessage: '',
       errorMessage: '',
       permissionMemberId: '',
       permissionList: '',
+      configured: false,
+      authorized: false,
+      isAdmin: false,
+      memberId: null,
+      permissionEntries: [],
+      permissionsByEmail: {},
       mounted() {
-        this.api = app.api;
-        if (!this.api) return;
+        this.backend = app.backend;
+        if (!this.backend) return;
 
-        this.api.onMessage((message) => this.handleMessage(message));
+        this.backend.listen('trello.status', (message) => {
+          if (!message.configured) {
+            const pendingToken = pendingTrelloToken;
+            pendingTrelloToken = null;
+
+            if (pendingToken) {
+              const apiKey = this.apiKeyInput || window.localStorage.getItem('trelloAgentApiKeyDraft');
+              const apiSecret = this.apiSecretInput || window.localStorage.getItem('trelloAgentApiSecretDraft');
+              if (!apiKey || !apiSecret) {
+                this.errorMessage = 'API key and secret are required to finish setup.';
+                return;
+              }
+              this.backend.pendingTrelloToken = null;
+              this.backend.send('trello.setup', { apiKey, secret: apiSecret, token: pendingToken });
+              window.localStorage.removeItem('trelloAgentApiKeyDraft');
+              window.localStorage.removeItem('trelloAgentApiSecretDraft');
+            }
+          }
+
+          this.syncAuthState();
+        });
+
+        this.backend.listen('error', (message) => {
+          this.errorMessage = message.error || 'Unknown error.';
+        });
+
+        this.backend.listen('auth.permissions', () => {
+          this.syncAuthState();
+          if (this.isAdmin) {
+            this.backend.send('permissions.list');
+          }
+        });
+
+        this.backend.listen('permissions.updated', () => {
+          this.syncAuthState();
+          if (this.isAdmin) {
+            this.backend.send('permissions.list');
+          }
+        });
+
+        this.backend.listen('auth.success', () => {
+          this.syncAuthState();
+        });
+
+        this.backend.listen('permissions.list', ({ permissions }) => {
+          this.permissionsByEmail = permissions || {};
+          this.syncPermissionEntries();
+        });
+
+        this.backend.listen('permissions.value', ({ email, permissions }) => {
+          this.permissionsByEmail[email] = permissions;
+          this.syncPermissionEntries();
+        });
         this.loadDraftApiKey();
 
+        this.syncAuthState();
+        this.syncPermissionEntries();
+
         if (this.isAdmin) {
-          this.api.requestPermissions();
+          this.backend.send('permissions.list');
         }
       },
-      get configured() {
-        return app.trelloStatus.configured;
+      syncAuthState() {
+        this.configured = !!this.backend?.configured;
+        this.authorized = !!this.backend?.auth?.email;
+        this.isAdmin = this.backend?.auth?.hasPermission
+          ? this.backend.auth.hasPermission('admin')
+          : false;
+        this.memberId = this.backend?.auth?.email || null;
       },
-      get authorized() {
-        return app.user.authorized;
-      },
-      get isAdmin() {
-        return app.hasPermission ? app.hasPermission('admin') : false;
-      },
-      get memberId() {
-        return app.user.memberId;
-      },
-      get permissionEntries() {
-        const permissions = app.trelloPermissions || {};
-        return Object.entries(permissions).map(([id, perms]) => {
+      syncPermissionEntries() {
+        const permissions = this.permissionsByEmail;
+        this.permissionEntries = Object.entries(permissions).map(([id, perms]) => {
           const list = Array.isArray(perms) ? perms : [];
           return {
             id,
@@ -110,32 +167,6 @@
             listLabel: list.length ? list.join(', ') : 'none',
           };
         });
-      },
-      handleMessage(message) {
-        if (message?.type === 'trello.status' && !message.configured) {
-          const pendingToken = app.consumePendingToken?.();
-          if (pendingToken) {
-            const apiKey = this.apiKeyInput || window.localStorage.getItem('trelloAgentApiKeyDraft');
-            const apiSecret = this.apiSecretInput || window.localStorage.getItem('trelloAgentApiSecretDraft');
-            if (!apiKey || !apiSecret) {
-              this.errorMessage = 'API key and secret are required to finish setup.';
-              return;
-            }
-            this.api.sendTrelloSetup({ apiKey, secret: apiSecret, token: pendingToken });
-            window.localStorage.removeItem('trelloAgentApiKeyDraft');
-            window.localStorage.removeItem('trelloAgentApiSecretDraft');
-          }
-        }
-
-        if (message?.type === 'error') {
-          this.errorMessage = message.error || 'Unknown error.';
-        }
-
-        if (message?.type === 'auth.permissions' || message?.type === 'permissions.updated') {
-          if (this.isAdmin) {
-            this.api.requestPermissions();
-          }
-        }
       },
       loadDraftApiKey() {
         const storedKey = window.localStorage.getItem('trelloAgentApiKeyDraft');
@@ -166,6 +197,8 @@
         window.location.assign(url.toString());
       },
       startAuth() {
+        if (!this.backend) return;
+        this.backend.send('auth');
       },
       savePermissions() {
         this.errorMessage = '';
@@ -177,11 +210,11 @@
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean);
-        this.api.sendPermissionsUpdate({
-          memberId: this.permissionMemberId,
+        this.backend.send('permissions.set', {
+          email: this.permissionMemberId,
           permissions,
         });
       },
-    };
+    });
   }
 </script>
