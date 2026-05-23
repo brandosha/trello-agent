@@ -49,6 +49,12 @@ class BackendClient {
 
     this.listen('auth.success', ({ email }) => {
       this.auth.email = email;
+
+      // If there are any active thread listeners, re-subscribe to ensure we continue receiving updates after a reconnect or auth change
+      Object.entries(this._threadListeners).forEach(([threadId, listeners]) => {
+        if (!listeners || !listeners.length) return;
+        this.send('thread.subscribe', { threadId });
+      });
     });
 
     this.listen('auth.permissions', ({ permissions }) => {

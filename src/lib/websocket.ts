@@ -31,7 +31,7 @@ class WsClient {
   email?: string;
   permissions?: UserPermissions
   private _unsubscribePermissions?: Unsubscribe;
-  codexThreads = new Map<string, SharedThread>();
+  codexThreads = new Map<string, Unsubscribe>();
 
   constructor(ws: WSContext<WebSocket>, origin: string | undefined) {
     this.ws = ws;
@@ -256,24 +256,21 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, cli
   }
 
   const thread = codex.thread(message.threadId);
-  // const clientInstance = thread.newClient(client.email!);
-  client.codexThreads.set(threadId, thread);
 
-  thread.subscribe(event => {
+  const unsubscribe = thread.subscribe(event => {
+    if (!client.permissions?.has('thread.view')) {
+      const unsub = client.codexThreads.get(threadId);
+      unsub?.();
+      return;
+    }
+
     client.send({
       type: "thread.event",
       threadId,
       event
     });
   });
-
-  // for await (const pastEvent of thread.pastEvents()) {
-  //   ws.send(JSON.stringify({
-  //     type: "thread.event",
-  //     threadId,
-  //     event: pastEvent
-  //   }));
-  // }
+  client.codexThreads.set(threadId, unsubscribe);
 });
 
 const abortMessageSchema = z.object({
@@ -285,6 +282,9 @@ const abortEndpoint = wsEndpoint(abortMessageSchema, async (message, client) => 
   const { threadId } = message;
 
   await client.checkPermissions(['thread.abort']);
+  if (!client.codexThreads.has(threadId)) {
+    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
+  }
 
   codex.thread(threadId).abort(client.email ?? "unk");
 });
@@ -299,6 +299,9 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) =
   const { threadId, prompt } = message;
 
   await client.checkPermissions(['thread.prompt']);
+  if (!client.codexThreads.has(threadId)) {
+    throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
+  }
 
   codex.thread(threadId).queueInput(prompt, client.email ?? 'unk')
 });
