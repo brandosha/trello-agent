@@ -43,24 +43,33 @@ export async function setTrelloConfig(newConfig: TrelloConfig): Promise<void> {
   await fs.writeFile(trelloConfigPath, payload);
 }
 
-export const TRELLO_CLIENT_IDENTIFIER = "Trello Agent";
-export async function makeTrelloApiRequest(endpoint: string, method: string = "GET", body?: any) {
+export const TRELLO_CLIENT_IDENTIFIER = "TrelloAgent";
+interface TrelloApiRequest {
+  method: string;
+  endpoint: string;
+  body?: any;
+  token?: string;
+  clientIdentifier?: string;
+}
+export async function makeTrelloApiRequest(request: TrelloApiRequest) {
   const config = await getTrelloConfig();
+  const token = request.token ?? config.token;
+  const clientIdentifier = request.clientIdentifier ?? TRELLO_CLIENT_IDENTIFIER;
 
-  const url = new URL(`https://api.trello.com/1/${endpoint}`);
+  const url = new URL(`https://api.trello.com/1/${request.endpoint}`);
   url.searchParams.set("key", config.apiKey);
-  url.searchParams.set("token", config.token);
+  url.searchParams.set("token", token);
 
   const options: RequestInit = {
-    method,
+    method: request.method,
     headers: {
       "Content-Type": "application/json",
-      "X-Trello-Client-Identifier": TRELLO_CLIENT_IDENTIFIER
+      "X-Trello-Client-Identifier": clientIdentifier
     },
   };
 
-  if (body) {
-    options.body = JSON.stringify(body);
+  if (request.body) {
+    options.body = JSON.stringify(request.body);
   }
 
   const response = await fetch(url.toString(), options);
@@ -73,7 +82,11 @@ export async function makeTrelloApiRequest(endpoint: string, method: string = "G
 }
 
 export async function getTrelloMember(token: string) {
-  return await makeTrelloApiRequest(`members/me`, "GET");
+  return await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: 'members/me',
+    token
+  });
 }
 
 export async function getTrelloApiKey() {
@@ -88,7 +101,10 @@ export interface TrelloBoard {
 }
 
 export async function listTrelloBoards(): Promise<TrelloBoard[]> {
-  const boards = await makeTrelloApiRequest("members/me/boards?fields=id,name,closed", "GET");
+  const boards = await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: 'members/me/boards?fields=id,name,closed',
+  });
   return Array.isArray(boards) ? boards.filter((board) => !board.closed) : [];
 }
 
@@ -112,7 +128,10 @@ export interface TrelloWebhook {
 
 export async function listTrelloWebhooks(): Promise<TrelloWebhook[]> {
   const config = await getTrelloConfig();
-  return await makeTrelloApiRequest(`tokens/${config.token}/webhooks`, "GET");
+  return await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: `tokens/${config.token}/webhooks`
+  });
 }
 
 export async function createTrelloWebhook(payload: {
@@ -120,11 +139,18 @@ export async function createTrelloWebhook(payload: {
   description: string;
   callbackURL: string;
 }): Promise<TrelloWebhook> {
-  return await makeTrelloApiRequest("webhooks", "POST", payload);
+  return await makeTrelloApiRequest({
+    method: 'POST',
+    endpoint: 'webhooks',
+    body: payload
+  });
 }
 
 export async function deleteTrelloWebhook(webhookId: string): Promise<void> {
-  await makeTrelloApiRequest(`webhooks/${webhookId}`, "DELETE");
+  await makeTrelloApiRequest({
+    method: 'DELETE',
+    endpoint: `webhooks/${webhookId}`
+  });
 }
 
 export interface TrelloWebhookRequest {
@@ -144,4 +170,10 @@ export async function verifyTrelloWebhookRequest(request: TrelloWebhookRequest) 
     .digest("base64");
   const headerHash = request.headers["x-trello-webhook"];
   return expectedHash === headerHash;
+}
+
+
+export async function getThreadUrl(threadId: string) {
+  const config = await getTrelloConfig();
+  return `${config.webhookOrigin}/${threadId}`;
 }

@@ -1,11 +1,10 @@
 import fs from "fs/promises";
 
-import { dataDir } from "./paths.js";
+import { dataDir, threadsDir } from "./paths.js";
 import { execFile } from "./utils.js";
 
 
 const reposDir = `${dataDir}/repos`;
-const workspacesDir = `${dataDir}/workspaces`;
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9\-]/g, "-");
@@ -43,13 +42,12 @@ export async function cloneRepo(repoLocation: string) {
   await execFile('git', ['config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'], { cwd: bareRepoDir });
 }
 
-interface SetupWorkspaceParams {
-  workspaceId: string;
+interface AddWorktreeParams {
+  location: string;
   repo: string;
-  mainBranch: string;
+  branch: string;
 }
-
-export async function setupWorkspace({ repo, workspaceId, mainBranch }: SetupWorkspaceParams) {
+export async function addDetachedGitWorktree({ location, repo, branch }: AddWorktreeParams) {
   const repoDir = getRepoDir(repo);
   const bareRepoDir = `${repoDir}/.bare`;
 
@@ -58,16 +56,6 @@ export async function setupWorkspace({ repo, workspaceId, mainBranch }: SetupWor
     await cloneRepo(repo);
   }
 
-  const workspaceDir = `${workspacesDir}/${workspaceId}`;
-  try {
-    await fs.access(workspaceDir, fs.constants.F_OK);
-    return workspaceDir; // Workspace already exists
-  } catch {
-    // Workspace doesn't exist, continue with setup
-  }
-
-  await execFile('git', ['fetch', 'origin', mainBranch], { cwd: bareRepoDir });
-  await execFile('git', ['worktree', 'add', workspaceDir, `origin/${mainBranch}`], { cwd: bareRepoDir });
-
-  return workspaceDir;
+  await execFile('git', ['fetch', 'origin', branch], { cwd: bareRepoDir });
+  await execFile('git', ['worktree', 'add', '--detach', location, `origin/${branch}`], { cwd: bareRepoDir });
 }
