@@ -138,8 +138,8 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
   }
 
   async isNew() {
-    const thread = await this._thread;
-    return !!thread.id;
+    await this._thread;
+    return this.history.length === 0;
   }
 
   async setOptions(options: ThreadOptions) {
@@ -280,5 +280,29 @@ class CodexSharedThreads {
 
 export const codex = new CodexSharedThreads();
 
-// Initialize default thread
-codex.thread("default");
+
+export const DEFAULT_AGENT_INSTRUCTIONS = `
+You are the Trello Agent Manager. This is your workspace where you can create and manage any resources you need to operate. memory/ is where you can store any persistent information you want to remember. Use memory/INDEX.md to to help you navigate your memories. You can create files and folders as needed to organize your workspace.
+You also have access to the trello API through the Trello mcp tool. Use it to understand trello boards, lists, and cards, and to create and manage them as needed when instructed.
+
+You do not work on tasks directly, the sytem will create seperate threads for each task and assign agents to them. Your role is to create and modify tasks in Trello as instructed.
+`.trim();
+
+async function setupDefaultThread() {
+  const defaultThread = codex.thread("default", {
+    sandboxMode: 'workspace-write',
+  });
+
+  await defaultThread.isNew().then(async (isNew) => {
+    const { workspaceDir } = defaultThread;
+
+    await fs.mkdir(`${workspaceDir}/memory`, { recursive: true });
+    await fs.writeFile(`${workspaceDir}/memory/INDEX.md`, "No memories yet.", { flag: "wx" }).catch(() => {});
+    await fs.writeFile(`${workspaceDir}/AGENTS.md`, DEFAULT_AGENT_INSTRUCTIONS);
+
+    if (isNew) {
+      defaultThread.queueInput("Introduce yourself.", "system");
+    }
+  });
+}
+setupDefaultThread().catch(console.error);
