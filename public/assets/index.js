@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'Router',
     'Console',
     'CodexLogin',
+    'ServerKey',
     'TrelloBoards',
     'Thread',
   ].map(importComponent));

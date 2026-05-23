@@ -17,6 +17,7 @@ import {
   deleteTrelloWebhook,
   getTrelloWebhookCallbackUrl,
 } from "./trello.js";
+import { getPublicKey } from "./ssh.js";
 import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
@@ -431,6 +432,24 @@ const trelloWebhooksSetEndpoint = wsEndpoint(trelloWebhooksSetSchema, async (mes
   }
 });
 
+const sshPublicKeySchema = z.object({
+  type: z.literal("ssh.public_key"),
+});
+
+const sshPublicKeyEndpoint = wsEndpoint(sshPublicKeySchema, async (message, client) => {
+  await client.checkPermissions(['admin']);
+
+  try {
+    const publicKey = await getPublicKey();
+    client.send({
+      type: "ssh.public_key",
+      publicKey,
+    });
+  } catch (err: any) {
+    throw new WsError("SSH_KEY_ERROR", err?.message || "Failed to load SSH public key.");
+  }
+});
+
 
 const codexLoginSchema = z.object({
   type: z.literal("codex.login"),
@@ -510,6 +529,7 @@ const endpoints: Record<string, WsMessageHandler> = {
   "trello.boards.list": trelloBoardsListEndpoint,
   "trello.webhooks.list": trelloWebhooksListEndpoint,
   "trello.webhooks.set": trelloWebhooksSetEndpoint,
+  "ssh.public_key": sshPublicKeyEndpoint,
   "thread.create": threadCreateEndpoint,
   "thread.subscribe": subscribeEndpoint,
   "thread.prompt": promptEndpoint,

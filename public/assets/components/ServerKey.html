@@ -1,0 +1,58 @@
+<template id="server-key-template">
+  <section class="panel" @vue:mounted="mounted">
+    <div class="panel-header">
+      <div>Server SSH key</div>
+      <div class="badge" v-if="loading">Loading...</div>
+    </div>
+    <div class="panel-body stack">
+      <div class="badge">Use this key to grant repo access for the server.</div>
+      <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+      <div class="input-row">
+        <button class="btn primary" @click="requestKey" :disabled="loading">Fetch public key</button>
+        <button class="btn" @click="copyKey" :disabled="!publicKey">Copy</button>
+      </div>
+      <pre v-if="publicKey" class="badge">{{ publicKey }}</pre>
+    </div>
+  </section>
+</template>
+<script>
+  function ServerKey() {
+    return PetiteVue.reactive({
+      $template: '#server-key-template',
+      backend: null,
+      publicKey: '',
+      loading: false,
+      errorMessage: '',
+      mounted() {
+        this.backend = app.backend;
+        if (!this.backend) return;
+
+        this.backend.listen('ssh.public_key', ({ publicKey }) => {
+          this.publicKey = publicKey || '';
+          this.loading = false;
+        });
+
+        this.backend.listen('error', (message) => {
+          if (message?.code === 'SSH_KEY_ERROR') {
+            this.errorMessage = message.message || 'Failed to load SSH public key.';
+            this.loading = false;
+          }
+        });
+      },
+      requestKey() {
+        if (!this.backend) return;
+        this.loading = true;
+        this.errorMessage = '';
+        this.backend.send('ssh.public_key');
+      },
+      async copyKey() {
+        if (!this.publicKey) return;
+        try {
+          await navigator.clipboard.writeText(this.publicKey);
+        } catch (err) {
+          this.errorMessage = 'Failed to copy key to clipboard.';
+        }
+      },
+    });
+  }
+</script>

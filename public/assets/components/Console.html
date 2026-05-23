@@ -62,6 +62,7 @@
           </div>
         </div>
       </section>
+      <div v-if="isAdmin" v-scope="ServerKey()"></div>
       <div v-if="isAdmin" v-scope="TrelloBoards()"></div>
       <div v-if="isAdmin" v-scope="CodexLogin()"></div>
     </div>
