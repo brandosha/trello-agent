@@ -16,7 +16,7 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     }
   }, null, 2)}`);
 
-  if (request.headers["x-trello-client-identifier"] !== "TrelloAgent/webhook") {
+  if (request.headers["x-trello-client-identifier"] === "TrelloAgent/webhook") {
     return; // Ignore webhooks sent by TrelloAgent itself to avoid loops
   }
 
@@ -76,8 +76,15 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
       `- Set up the agent's workspace according to the project guidelines`,
       `- Prompt the agent to analyze the card and determine what actions to take`,
     ].join('\n'), "system/webhook/trello");
+  }
 
-    const threadUrl = await getThreadUrl(threadId);
+  const threadUrl = await getThreadUrl(threadId);
+  const attachments = await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: `cards/${cardId}/attachments?fields=url,name`,
+  });
+  const hasThreadAttachment = attachments.some((attachment: any) => attachment.url === threadUrl);
+  if (!hasThreadAttachment) {
     await makeTrelloApiRequest({
       method: 'POST',
       endpoint: `cards/${cardId}/attachments`,
