@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync } from "fs";
 import fs from "fs/promises";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
 import { rootDir, dataDir } from "./paths.js";
 import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
-import { randomStr } from "./utils.js";
-import { ChildProcessWithoutNullStreams, spawn } from "child_process";
+import { randomStr, isUbuntu } from "./utils.js";
 
 
 const codexInterface = new Codex({
@@ -18,6 +18,9 @@ const codexInterface = new Codex({
         args: [`${rootDir}/dist/src/mcp.js`],
         default_tools_approval_mode: 'approve',
       }
+    },
+    features: {
+      use_legacy_landlock: isUbuntu()
     }
   }
 });
