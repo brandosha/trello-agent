@@ -7,6 +7,7 @@ import { rootDir, dataDir } from "./paths.js";
 import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
 import { randomStr } from "./utils.js";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 
 const codexInterface = new Codex({
@@ -276,7 +277,43 @@ class CodexSharedThreads {
       return thread;
     }
   }
+
+  private _login: CodexLogin;
+  login() {
+    if (this._login) {
+      return this._login;
+    }
+
+    const login = this._login = {
+      process: spawn("codex", ["login", "--device-auth"], {
+        env: process.env,
+        timeout: 600000
+      }),
+      output: new HistorySub()
+    };
+
+    login.process.stdout.on("data", (data) => {
+      login.output.publish({ stream: 'stdout', text: data.toString() });
+    });
+
+    login.process.stderr.on("data", (data) => {
+      login.output.publish({ stream: 'stderr', text: data.toString() });
+    });
+
+    login.process.on("close", (code, signal) => {
+      this._login = undefined;
+      if (signal == null && code === 0) {
+        setupDefaultThread().catch(console.error);
+      }
+    });
+
+    return login;
+  }
 }
+type CodexLogin = {
+  process: ChildProcessWithoutNullStreams;
+  output: HistorySub<{ stream: 'stdout' | 'stderr', text: string }>;
+} | undefined;
 
 export const codex = new CodexSharedThreads();
 
@@ -305,4 +342,3 @@ async function setupDefaultThread() {
     }
   });
 }
-setupDefaultThread().catch(console.error);

@@ -455,70 +455,31 @@ const codexLoginSchema = z.object({
   type: z.literal("codex.login"),
 });
 
-let codexLoginProcess: ChildProcessWithoutNullStreams | undefined
-
 const codexLoginEndpoint = wsEndpoint(codexLoginSchema, async (message, client) => {
   await client.checkPermissions(['admin']);
 
-  if (codexLoginProcess && !codexLoginProcess.killed) {
-    throw new WsError("PROCESS_RUNNING", "Codex login is already running.");
-  }
-
-  const child = spawn("codex", ["login", "--device-auth"], {
-    env: process.env,
-    timeout: 600000
-  });
-  codexLoginProcess = child;
-
-  client.send({ type: "codex.login.started" });
-
-  child.stdout.on("data", (data) => {
+  const login = codex.login();
+  login.output.subscribe(output => {
     client.send({
       type: "codex.login.output",
-      stream: "stdout",
-      text: data.toString(),
+      ...output
     });
   });
 
-  child.stderr.on("data", (data) => {
-    client.send({
-      type: "codex.login.output",
-      stream: "stderr",
-      text: data.toString(),
-    });
-  });
-
-  child.on("error", (err) => {
-    codexLoginProcess = undefined;
+  login.process.on("error", (err) => {
     client.send({
       type: "codex.login.error",
       message: err.message,
     });
   });
 
-  child.on("close", (code, signal) => {
-    codexLoginProcess = undefined;
+  login.process.on("close", (code, signal) => {
     client.send({
       type: "codex.login.exit",
       code,
       signal,
     });
   });
-});
-
-const codexLoginStopSchema = z.object({
-  type: z.literal("codex.login.stop"),
-});
-
-const codexLoginStopEndpoint = wsEndpoint(codexLoginStopSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
-
-  if (!codexLoginProcess || codexLoginProcess.killed) {
-    throw new WsError("NO_PROCESS", "Codex login is not running.");
-  }
-
-  codexLoginProcess.kill("SIGTERM");
-  client.send({ type: "codex.login.stopped" });
 });
 
 
@@ -537,7 +498,6 @@ const endpoints: Record<string, WsMessageHandler> = {
   "permissions.set": permissionsSetEndpoint,
   "permissions.list": permissionsListEndpoint,
   "codex.login": codexLoginEndpoint,
-  "codex.login.stop": codexLoginStopEndpoint,
 };
 
 
