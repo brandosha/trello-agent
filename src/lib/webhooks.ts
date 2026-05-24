@@ -41,43 +41,8 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     console.log("Trello card does not have an agent label, skipping");
     return;
   }
-  
-  const cardName = request.body.action.data.card.name;
-  const boardName = request.body.model.name;
-
-  const list = await makeTrelloApiRequest({
-    method: 'GET',
-    endpoint: `lists/${cardDetails.idList}?fields=name`,
-  });
-  const listName = list.name;
-
-  const orgId = request.body.model.idOrganization;
-  const organization = await makeTrelloApiRequest({
-    method: 'GET',
-    endpoint: `organizations/${orgId}?fields=name`,
-  });
-  const orgName = organization.name;
 
   const threadId = `trello-card-${cardId}`;
-  const thread = codex.thread(threadId, {
-    sandboxMode: 'workspace-write',
-  });
-
-  if (await thread.isNew()) {
-    console.log(`Creating new thread for Trello card ${cardId}`);
-    const managerThread = codex.thread("default");
-    managerThread.queueInput([
-      `[system/webhook/trello]`,
-      `New agent thread created for Trello card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}".`,
-      `Card ID: ${cardId}`,
-      `Thread ID: ${threadId}`,
-      ``,
-      `Next steps:`,
-      `- Set up the agent's workspace according to the project guidelines`,
-      `- Prompt the agent to analyze the card and determine what actions to take`,
-    ].join('\n'), "system/webhook/trello");
-  }
-
   const threadUrl = await getThreadUrl(threadId);
   const attachments = await makeTrelloApiRequest({
     method: 'GET',
@@ -95,7 +60,51 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
       clientIdentifier: `TrelloAgent/webhook`
     });
   }
+  
+  const cardName = request.body.action.data.card.name;
+  const boardName = request.body.model.name;
 
-  const actionType = request.body.action.type;
-  console.log(`Handling Trello action of type ${actionType} for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}"`);
+  const list = await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: `lists/${cardDetails.idList}?fields=name`,
+  });
+  const listName = list.name;
+
+  const orgId = request.body.model.idOrganization;
+  const organization = await makeTrelloApiRequest({
+    method: 'GET',
+    endpoint: `organizations/${orgId}?fields=displayName`,
+  });
+  const orgName = organization.displayName;
+  
+  const thread = codex.thread(threadId, {
+    sandboxMode: 'workspace-write',
+  });
+
+  if (await thread.isNew()) {
+    console.log(`Creating new thread for Trello card ${cardId}`);
+    const managerThread = codex.thread("default");
+    managerThread.queueInput([
+      `[system/webhook/trello]`,
+      `New agent thread created for Trello card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}".`,
+      `Card ID: ${cardId}`,
+      `Thread ID: ${threadId}`,
+      ``,
+      `Next steps:`,
+      `- Set up the agent's workspace according to the project guidelines`,
+      `- Prompt the agent to analyze the card and determine what actions to take`,
+    ].join('\n'), "system/webhook/trello");
+  } else {
+    thread.queueInput([
+      `[system/webhook/trello]`,
+      `Trello action on board "${boardName}" in organization "${orgName}":`,
+      JSON.stringify(request.body.action),
+      ``,
+      `Next steps:`,
+      `- Analyze the action and determine what, if anything, needs to be done in response based on the card's current state and project guidelines.`,
+    ].join('\n'), "system/webhook/trello");
+  }
+
+  // const actionType = request.body.action.type;
+  // console.log(`Handling Trello action of type ${actionType} for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}"`);
 }
