@@ -7,7 +7,7 @@ import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@
 import { rootDir, dataDir } from "./paths.js";
 import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
-import { randomStr, isUbuntu } from "./utils.js";
+import { randomStr } from "./utils.js";
 
 
 const codexInterface = new Codex({
@@ -19,9 +19,8 @@ const codexInterface = new Codex({
         default_tools_approval_mode: 'approve',
       }
     },
-    features: {
-      use_legacy_landlock: isUbuntu()
-    }
+    approval_policy: 'on-request',
+    approvals_reviewer: 'auto_review',
   }
 });
 
@@ -328,11 +327,10 @@ You also have access to the trello API through the Trello mcp tool. Use it to un
 You do not work on tasks directly, the sytem will create seperate threads for each task and assign agents to them. Your role is to create and modify tasks in Trello as instructed.
 `.trim();
 
+const defaultThread = codex.thread("default", {
+  sandboxMode: 'workspace-write',
+});
 async function setupDefaultThread() {
-  const defaultThread = codex.thread("default", {
-    sandboxMode: 'workspace-write',
-  });
-
   await defaultThread.isNew().then(async (isNew) => {
     const { workspaceDir } = defaultThread;
 
