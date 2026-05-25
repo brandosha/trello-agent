@@ -19,6 +19,7 @@ export const rootDir = getRootDir();
 export const dataDir = path.join(rootDir, "data");
 export const configDir = path.join(dataDir, "config");
 export const threadsDir = path.join(dataDir, "threads");
+export const reposDir = `${dataDir}/repos`;
 
 if (!existsSync(dataDir)) {
   mkdirSync(dataDir, { recursive: true });

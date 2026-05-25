@@ -1,3 +1,5 @@
+import path from "path";
+
 import { McpServer, ServerContext, StdioServerTransport } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
@@ -26,11 +28,15 @@ server.registerTool("trello-api", {
   }),
 }, async (input) => {
 
+  const workingDir = await getWorkingDirectory();
+  const threadId = path.basename(path.join(workingDir, ".."));
+
   try {
     const response = await makeTrelloApiRequest({
       method: input.method,
       endpoint: input.endpoint,
       body: input.body,
+      clientIdentifier: `TrelloAgent/mcp/thread/${threadId}`
     });
 
     return {
@@ -59,6 +65,15 @@ server.registerTool("trello-api", {
 });
 
 
+async function getWorkingDirectory() {
+  const { roots } = await server.server.listRoots();
+  if (!roots || roots.length === 0) {
+    return process.cwd();
+  }
+
+  return roots[0].uri.replace('file:/', '');
+}
+
 async function isManagerThread(context: ServerContext): Promise<boolean> {
   const managerThreadId = 'default';
   const managerWorkspace = `${threadsDir}/${managerThreadId}/workspace`;
@@ -72,78 +87,132 @@ async function isManagerThread(context: ServerContext): Promise<boolean> {
   return roots.some((root: any) => root.uri === `file://${managerWorkspace}`);
 }
 
-server.registerTool("prompt_thread", {
-  description: "Tool for sending a prompt to a thread. Only the manager thread is authorized to use this tool.",
+// server.registerTool("prompt_thread", {
+//   description: "Tool for sending a prompt to a thread. Only the manager thread is authorized to use this tool.",
+//   inputSchema: z.object({
+//     threadId: z.string(),
+//     prompt: z.string(),
+//   })
+// }, async (input, context) => {
+//   const isManager = await isManagerThread(context);
+//   if (!isManager) {
+//     return {
+//       isError: true,
+//       content: [{
+//         type: 'text',
+//         text: 'Unauthorized: prompt_thread tool can only be used by the manager thread'
+//       }]
+//     };
+//   }
+
+//   if (!codex.threadExists(input.threadId)) {
+//     return {
+//       isError: true,
+//       content: [{
+//         type: 'text',
+//         text: `Thread with ID ${input.threadId} does not exist`
+//       }]
+//     };
+//   }
+
+//   const thread = codex.thread(input.threadId);
+//   thread.queueInput(input.prompt, 'system/mcp/prompt_thread');
+
+//   return {
+//     isError: false,
+//     content: [{
+//       type: 'text',
+//       text: `Prompt sent to thread ${input.threadId}`
+//     }]
+//   };
+// });
+
+// server.registerTool("setup_thread_workspace", {
+//   description: "Tool for setting up git worktree for a thread. Only the manager thread is authorized to use this tool. Always prefer ssh git URLs.",
+//   inputSchema: z.object({
+//     threadId: z.string(),
+//     gitRepo: z.string(),
+//   })
+// }, async (input, context) => {
+//   const isManager = await isManagerThread(context);
+//   if (!isManager) {
+//     return {
+//       isError: true,
+//       content: [{
+//         type: 'text',
+//         text: 'Unauthorized: setup_thread_workspace tool can only be used by the manager thread'
+//       }]
+//     };
+//   }
+
+//   if (!codex.threadExists(input.threadId)) {
+//     return {
+//       isError: true,
+//       content: [{
+//         type: 'text',
+//         text: `Thread with ID ${input.threadId} does not exist`
+//       }]
+//     };
+//   }
+
+//   const thread = codex.thread(input.threadId);
+//   try {
+//     await addDetachedGitWorktree({
+//       location: thread.workspaceDir,
+//       repo: input.gitRepo,
+//       branch: 'main'
+//     });
+//   } catch (error) {
+//     return {
+//       isError: true,
+//       content: [{
+//         type: 'text',
+//         text: `Failed to set up workspace for thread ${input.threadId}\nError: ${error}`
+//       }]
+//     };
+//   }
+
+//   return {
+//     isError: false,
+//     content: [{
+//       type: 'text',
+//       text: `Workspace set up for thread ${input.threadId}`
+//     }]
+//   };
+// });
+
+server.registerTool("git_clone", {
+  description: "Tool for cloning a git repository. Must clone from an ssh URL and the destination must be a relative path within the current working directory.",
   inputSchema: z.object({
-    threadId: z.string(),
-    prompt: z.string(),
-  })
-}, async (input, context) => {
-  const isManager = await isManagerThread(context);
-  if (!isManager) {
-    return {
-      isError: true,
-      content: [{
-        type: 'text',
-        text: 'Unauthorized: prompt_thread tool can only be used by the manager thread'
-      }]
-    };
-  }
-
-  if (!codex.threadExists(input.threadId)) {
-    return {
-      isError: true,
-      content: [{
-        type: 'text',
-        text: `Thread with ID ${input.threadId} does not exist`
-      }]
-    };
-  }
-
-  const thread = codex.thread(input.threadId);
-  thread.queueInput(input.prompt, 'system/mcp/prompt_thread');
-
-  return {
-    isError: false,
-    content: [{
-      type: 'text',
-      text: `Prompt sent to thread ${input.threadId}`
-    }]
-  };
-});
-
-server.registerTool("setup_thread_workspace", {
-  description: "Tool for setting up git worktree for a thread. Only the manager thread is authorized to use this tool. Always prefer ssh git URLs.",
-  inputSchema: z.object({
-    threadId: z.string(),
     gitRepo: z.string(),
-  })
+    destination: z.string(),
+  }),
 }, async (input, context) => {
-  const isManager = await isManagerThread(context);
-  if (!isManager) {
+  if (!input.gitRepo.startsWith("git@")) {
     return {
       isError: true,
       content: [{
         type: 'text',
-        text: 'Unauthorized: setup_thread_workspace tool can only be used by the manager thread'
+        text: 'Invalid git repository URL. Only SSH URLs starting with git@ are supported.'
       }]
     };
   }
 
-  if (!codex.threadExists(input.threadId)) {
+  const workingDir = await getWorkingDirectory();
+  const destinationPath = path.join(workingDir, input.destination);
+  if (destinationPath.includes('..')) {
     return {
       isError: true,
       content: [{
         type: 'text',
-        text: `Thread with ID ${input.threadId} does not exist`
+        text: 'Invalid destination path'
       }]
     };
   }
 
-  const thread = codex.thread(input.threadId);
   try {
     await addDetachedGitWorktree({
-      location: thread.workspaceDir,
+      location: destinationPath,
       repo: input.gitRepo,
       branch: 'main'
     });
@@ -152,7 +221,7 @@ server.registerTool("setup_thread_workspace", {
       isError: true,
       content: [{
         type: 'text',
-        text: `Failed to set up workspace for thread ${input.threadId}\nError: ${error}`
+        text: `Failed to clone repository\nError: ${error}`
       }]
     };
   }
@@ -161,7 +230,7 @@ server.registerTool("setup_thread_workspace", {
     isError: false,
     content: [{
       type: 'text',
-      text: `Workspace set up for thread ${input.threadId}`
+      text: `Repository cloned to ${destinationPath}`
     }]
   };
 });

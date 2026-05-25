@@ -1,10 +1,8 @@
 import fs from "fs/promises";
 
-import { dataDir, threadsDir } from "./paths.js";
+import { reposDir } from "./paths.js";
 import { execFile } from "./utils.js";
 
-
-const reposDir = `${dataDir}/repos`;
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9\-]/g, "-");

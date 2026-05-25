@@ -16,7 +16,8 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     }
   }, null, 2)}`);
 
-  if (request.headers["x-trello-client-identifier"] === "TrelloAgent/webhook") {
+  const clientIdentifier = request.headers["x-trello-client-identifier"];
+  if (clientIdentifier === "TrelloAgent/webhook") {
     return; // Ignore webhooks sent by TrelloAgent itself to avoid loops
   }
 
@@ -24,6 +25,11 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   if (!cardId) {
     console.warn("Trello webhook does not contain card information, skipping");
     return;
+  }
+
+  const threadId = `trello-card-${cardId}`;
+  if (clientIdentifier === `TrelloAgent/mcp/thread/${threadId}`) {
+    return; // Don't prompt if the webhook is triggered by an action that was just taken by the agent
   }
 
   const cardDetails = await makeTrelloApiRequest({
@@ -42,7 +48,6 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     return;
   }
 
-  const threadId = `trello-card-${cardId}`;
   const threadUrl = await getThreadUrl(threadId);
   const attachments = await makeTrelloApiRequest({
     method: 'GET',
@@ -82,28 +87,18 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   });
 
   if (await thread.isNew()) {
-    console.log(`Creating new thread for Trello card ${cardId}`);
-    const managerThread = codex.thread("default");
-    managerThread.queueInput([
-      `[system/webhook/trello]`,
-      `New agent thread created for Trello card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}".`,
-      `Card ID: ${cardId}`,
-      `Thread ID: ${threadId}`,
-      ``,
-      `Next steps:`,
-      `- Set up the agent's workspace according to the project guidelines`,
-      `- Prompt the agent to analyze the card and determine what actions to take`,
-    ].join('\n'), "system/webhook/trello");
-  } else {
-    thread.queueInput([
-      `[system/webhook/trello]`,
-      `Trello action on board "${boardName}" in organization "${orgName}":`,
-      JSON.stringify(request.body.action),
-      ``,
-      `Next steps:`,
-      `- Analyze the action and determine what, if anything, needs to be done in response based on the card's current state and project guidelines.`,
-    ].join('\n'), "system/webhook/trello");
+    console.log(`Created a new thread for Trello card ${cardId}`);
   }
+
+  thread.queueInput([
+    `[system/webhook/trello]`,
+    `Trello action on board "${boardName}" in organization "${orgName}":`,
+    `X-Trello-Client-Identifier: ${clientIdentifier ?? "none"}`,
+    JSON.stringify(request.body.action),
+    ``,
+    `Next steps:`,
+    `- Analyze the action and determine what, if anything, needs to be done in response based on the card's current state and project guidelines.`,
+  ].join('\n'), "system/webhook/trello");
 
   // const actionType = request.body.action.type;
   // console.log(`Handling Trello action of type ${actionType} for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}"`);

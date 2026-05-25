@@ -4,7 +4,7 @@ import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
-import { rootDir, dataDir } from "./paths.js";
+import { rootDir, dataDir, reposDir } from "./paths.js";
 import { HistorySub, Unsubscribe } from "./PubSub.js";
 import { Logger } from "./Logger.js";
 import { randomStr } from "./utils.js";
@@ -21,6 +21,10 @@ const codexInterface = new Codex({
     },
     approval_policy: 'on-request',
     approvals_reviewer: 'auto_review',
+    sandbox_workspace_write: {
+      writable_roots: [reposDir],
+      network_access: true,
+    }
   }
 });
 
