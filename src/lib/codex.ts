@@ -19,6 +19,7 @@ const codexInterface = new Codex({
         default_tools_approval_mode: 'approve',
       }
     },
+    sandbox_mode: 'danger-full-access',
     approval_policy: 'on-request',
     approvals_reviewer: 'auto_review',
     sandbox_workspace_write: {
