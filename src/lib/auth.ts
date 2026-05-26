@@ -1,8 +1,6 @@
-import fs from "fs/promises";
-
-import { configDir } from "./paths.js";
-
 import { SignJWT, jwtVerify, generateSecret, JWTPayload, exportJWK, importJWK } from "jose";
+
+import { getConfigValue, setConfigValue } from "./database.js";
 
 interface AuthPayload extends JWTPayload {
   email: string;
@@ -11,22 +9,17 @@ interface AuthPayload extends JWTPayload {
 const JWT_ALG = "HS256";
 
 const symmetricKey = (async () => {
-  const keyPath = `${configDir}/jwt_secret.json`;
-
+  const json = getConfigValue("jwt.secret");
   try {
-    const raw = await fs.readFile(keyPath, "utf-8");
-    const jwk = JSON.parse(raw);
+    const jwk = JSON.parse(json ?? "");
     return await importJWK(jwk, JWT_ALG);
   } catch (err: any) {
-    if (err?.code === "ENOENT") {
-      const newKey = await generateSecret(JWT_ALG, {
-        extractable: true,
-      }) as CryptoKey;
-      const jwk = await exportJWK(newKey);
-      await fs.writeFile(keyPath, JSON.stringify(jwk));
-      return newKey;
-    }
-    throw err;
+    const newKey = await generateSecret(JWT_ALG, {
+      extractable: true,
+    }) as CryptoKey;
+    const jwk = await exportJWK(newKey);
+    setConfigValue("jwt.secret", JSON.stringify(jwk));
+    return newKey;
   }
 })();
 

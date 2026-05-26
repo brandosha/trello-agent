@@ -1,9 +1,6 @@
 import crypto from "crypto";
-import fs from "fs/promises";
 
-import { configDir } from "./paths.js";
-
-const trelloConfigPath = `${configDir}/trello.json`;
+import { getConfigValues, setConfigValues } from "./database.js";
 
 export interface TrelloConfig {
   apiKey: string;
@@ -12,35 +9,46 @@ export interface TrelloConfig {
   webhookOrigin: string;
 }
 
-async function readTrelloConfig() {
-  try {
-    const raw = await fs.readFile(trelloConfigPath, "utf-8");
-    return JSON.parse(raw) as TrelloConfig;
-  } catch (err: any) {
-    console.error("Error reading Trello configuration:", err);
-    return null;
-  }
+function readTrelloConfig() {
+  const dbConfigValues = getConfigValues([
+    "trello.api_key",
+    "trello.secret",
+    "trello.token",
+    "trello.webhook_origin"
+  ]);
+
+  const config: Partial<TrelloConfig> = {
+    apiKey: dbConfigValues["trello.api_key"],
+    secret: dbConfigValues["trello.secret"],
+    token: dbConfigValues["trello.token"],
+    webhookOrigin: dbConfigValues["trello.webhook_origin"]
+  };
+
+  return config;
 }
 
 let storedConfig = readTrelloConfig();
 
 export async function trelloIsConfigured(): Promise<boolean> {
-  const config = await storedConfig;
-  return !!(config?.apiKey && config?.secret && config?.token);
+  const config = storedConfig;
+  return !!(config.apiKey && config.secret && config.token && config.webhookOrigin);
 }
 
 async function getTrelloConfig(): Promise<TrelloConfig> {
-  const config = await storedConfig;
-  if (!config) {
+  if (!trelloIsConfigured()) {
     throw new Error("Trello configuration not found");
   }
-  return config;
+  return storedConfig as TrelloConfig;
 }
 
-export async function setTrelloConfig(newConfig: TrelloConfig): Promise<void> {
-  const payload = JSON.stringify(newConfig, null, 2);
-  storedConfig = Promise.resolve(newConfig);
-  await fs.writeFile(trelloConfigPath, payload);
+export function setTrelloConfig(newConfig: TrelloConfig) {
+  storedConfig = newConfig;
+  setConfigValues({
+    "trello.api_key": newConfig.apiKey,
+    "trello.secret": newConfig.secret,
+    "trello.token": newConfig.token,
+    "trello.webhook_origin": newConfig.webhookOrigin
+   });
 }
 
 export const TRELLO_CLIENT_IDENTIFIER = "TrelloAgent";
