@@ -169,6 +169,10 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     }
   }
 
+  promptImmediately(prompt: Input, from: string, options: TurnOptions = {}) {
+    this.queueInput(prompt, from, options)
+    this.abort(from);
+  }
 
   queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
     const turnId = generateEventId();
