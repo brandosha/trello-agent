@@ -5,8 +5,7 @@ import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
 import { rootDir, dataDir, reposDir } from "./paths.js";
-import { HistorySub, Unsubscribe } from "./PubSub.js";
-import { Logger } from "./Logger.js";
+import { HistorySub } from "./PubSub.js";
 import { randomStr } from "./utils.js";
 
 
@@ -95,9 +94,6 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
   private _threadQueue: Promise<Thread>;
   private _fileAppendQueue: Promise<fs.FileHandle>;
   private _abortController = new AbortController();
-  private _logAppendQueue: Promise<fs.FileHandle>;
-  private _logger = new Logger();
-  private _logUnsubscribe: Unsubscribe;
   // private _pubsub = new PubSub<SharedThreadEvent>();
 
   constructor(id: string, options: ThreadOptions = {}) {
@@ -136,14 +132,6 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
         throw err;
       });
     this._threadQueue = this._thread;
-
-    this._logAppendQueue = mkdir.then(() => fs.open(`${this._threadDir}/log.jsonl`, "a"));
-    this._logUnsubscribe = this._logger.subscribe(message => {
-      this._logAppendQueue = this._logAppendQueue.then(async handle => {
-        await handle.appendFile(JSON.stringify(message) + "\n");
-        return handle;
-      });
-    });
   }
 
   private configureOptions(options: ThreadOptions) {
@@ -193,9 +181,6 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     result.events.push(queuedEvent);
     this.publish(queuedEvent);
     this.recordEvent(queuedEvent);
-
-    this._logger.info(`Queued input from ${from}: ${JSON.stringify({ prompt, options })}`);
-
     const promise = this._threadQueue.then(async (thread) => {
       const inputEvent: SharedThreadEvent = {
         type: "input.prompt",
@@ -283,8 +268,6 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
 
   destroy() {
     this._abortController.abort();
-    this._logUnsubscribe();
-    this._logAppendQueue.then(handle => handle.close());
     this._fileAppendQueue.then(handle => handle.close());
   }
 }
