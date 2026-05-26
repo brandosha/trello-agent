@@ -83,9 +83,7 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   });
   const orgName = organization.displayName;
   
-  const thread = codex.thread(threadId, {
-    sandboxMode: 'workspace-write',
-  });
+  const thread = codex.thread(threadId);
 
   const isNew = await thread.isNew();
   if (await thread.isNew()) {
