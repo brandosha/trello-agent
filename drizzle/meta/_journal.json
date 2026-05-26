@@ -8,6 +8,13 @@
       "when": 1779833280822,
       "tag": "0000_unknown_banshee",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779839767714,
+      "tag": "0001_fearless_wallop",
+      "breakpoints": true
     }
   ]
 }

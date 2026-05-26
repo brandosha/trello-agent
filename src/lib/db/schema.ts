@@ -10,6 +10,13 @@ export const permissionsTable = sqliteTable("permissions", {
   permissions: text("permissions").notNull(), // Comma-separated list of permissions
 });
 
+export const threadsTable = sqliteTable("threads", {
+  id: text("id").primaryKey(),
+  codexThreadId: text("codex_thread_id"),
+  createdAt: int("created_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
+  updatedAt: int("updated_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
+});
+
 export const threadEventsTable = sqliteTable("thread_events", {
   id: int("id").primaryKey({ autoIncrement: true }),
   threadId: text("thread_id").notNull(),
