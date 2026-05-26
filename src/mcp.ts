@@ -1,10 +1,11 @@
+import fs from "fs/promises";
 import path from "path";
 
 import { McpServer, ServerContext, StdioServerTransport } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { codex } from './lib/codex.js';
-import { threadsDir } from './lib/paths.js';
+import { threadsDir, configDir } from './lib/paths.js';
 import { makeTrelloApiRequest } from './lib/trello.js';
 import { addDetachedGitWorktree } from './lib/workspaces.js';
 
@@ -14,6 +15,7 @@ const server = new McpServer({
   version: '0.1.0',
 }, {
   capabilities: {
+    resources: {},
     logging: {},
   }
 });
@@ -231,6 +233,71 @@ server.registerTool("git_clone", {
     content: [{
       type: 'text',
       text: `Repository cloned to ${destinationPath}`
+    }]
+  };
+});
+
+
+const setupInstructionsPath = path.join(configDir, "workspace_setup_instructions.json");
+function getSetupInstructions() {
+  return fs.readFile(setupInstructionsPath, "utf-8")
+    .then(contents => JSON.parse(contents))
+    .catch(() => ({}));
+}
+
+server.registerResource("workspace_setup_instructions",
+  "trello-agent://workspace_setup_instructions.json",
+  {
+    title: "Workspace Setup Instructions",
+    description: "Instructions for setting up the workspace for a new thread.",
+  },
+  async (uri) => {
+
+    const instructions = await getSetupInstructions();
+
+    instructions.__SYSTEM_INSTRUCTIONS__ = [
+      "Never assume. If you are unsure how to set up your workspace, ask. Then use the `set_workspace_setup_instructions` tool to write the instructions you receive for future reference. Unless otherwise specified, setup instructions are specific to the Trello board that the thread is associated with.",
+      "If you need to clone a repository, do not use `git clone` directly. Always use the `git_clone` tool. Once a repository is cloned, immediately read the instructions in AGENTS.md or similar documentation within the repository and follow them.",
+    ].join("\n");
+
+    return {
+      contents: [{
+        uri: uri.href,
+        mimeType: 'application/json',
+        text: JSON.stringify(instructions),
+      }]
+    };
+  }
+);
+
+server.registerTool("set_workspace_setup_instructions", {
+  description: "Tool for writing the contents of the workspace setup instructions resource.",
+  inputSchema: z.object({
+    key: z.string(),
+    text: z.string(),
+  })
+}, async (input, context) => {
+
+  const { key, text } = input;
+  if (key.startsWith("__") || key.endsWith("__")) {
+    return {
+      isError: true,
+      content: [{
+        type: 'text',
+        text: 'Keys starting and ending with "__" are reserved and cannot be modified.'
+      }]
+    };
+  }
+
+  const instructions = await getSetupInstructions();
+  instructions[key] = text;
+  await fs.writeFile(setupInstructionsPath, JSON.stringify(instructions));
+
+  return {
+    isError: false,
+    content: [{
+      type: 'text',
+      text: 'Workspace setup instructions updated successfully'
     }]
   };
 });

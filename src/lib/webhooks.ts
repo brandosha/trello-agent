@@ -1,6 +1,7 @@
 import { codex } from "./codex.js";
 import { logger } from "./Logger.js"
 import { TrelloWebhookRequest, getThreadUrl, makeTrelloApiRequest } from "./trello.js";
+import { multilineString } from "./utils.js";
 
 export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   console.log(`Trello webhook received:\n${JSON.stringify({
@@ -86,19 +87,21 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     sandboxMode: 'workspace-write',
   });
 
+  const isNew = await thread.isNew();
   if (await thread.isNew()) {
     console.log(`Created a new thread for Trello card ${cardId}`);
   }
 
-  thread.queueInput([
+  thread.queueInput(multilineString(
     `[system/webhook/trello]`,
     `Trello action on board "${boardName}" in organization "${orgName}":`,
     `X-Trello-Client-Identifier: ${clientIdentifier ?? "none"}`,
     JSON.stringify(request.body.action),
     ``,
     `Next steps:`,
+    isNew && `- Set up your workspace for this thread. Follow the instructions in the workspace_setup_instructions.json resource.`,
     `- Analyze the action and determine what, if anything, needs to be done in response based on the card's current state and project guidelines.`,
-  ].join('\n'), "system/webhook/trello");
+  ), "system/webhook/trello");
 
   // const actionType = request.body.action.type;
   // console.log(`Handling Trello action of type ${actionType} for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}"`);

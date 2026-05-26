@@ -15,3 +15,7 @@ export function randomStr(length: number = 8) {
   }
   return result;
 }
+
+export function multilineString(...lines: (string | boolean)[]) {
+  return lines.filter((l) => typeof l === "string").join("\n");
+}
