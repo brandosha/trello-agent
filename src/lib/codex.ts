@@ -36,6 +36,7 @@ if (!existsSync(threadsDir)) {
 
 interface PromptQueuedEvent {
   type: "input.prompt.queued";
+  turnId: string;
   from: string;
   prompt: Input;
   options: TurnOptions;
@@ -43,6 +44,7 @@ interface PromptQueuedEvent {
 
 interface PromptEvent {
   type: "input.prompt";
+  turnId: string;
   from: string;
   prompt: Input;
   options: TurnOptions;
@@ -55,10 +57,12 @@ interface AbortEvent {
 
 interface TurnAbortEvent {
   type: "turn.abort";
+  turnId: string;
 }
 
 interface TurnErrorEvent {
   type: "turn.error";
+  turnId: string;
   error: {
     name: string;
     message: string;
@@ -74,6 +78,11 @@ type SharedThreadEvent = (
 
 function generateEventId() {
   return randomStr(5);
+}
+
+interface SharedThreadTurn {
+  turnId: string;
+  events: SharedThreadEvent[];
 }
 
 export class SharedThread extends HistorySub<SharedThreadEvent> {
@@ -160,27 +169,40 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     }
   }
 
-  queueInput(prompt: Input, from: string, options: TurnOptions = {}) {
-    this.publish({
+
+  queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
+    const turnId = generateEventId();
+    const result: SharedThreadTurn = {
+      turnId,
+      events: []
+    };
+    
+    const queuedEvent: SharedThreadEvent = {
       type: "input.prompt.queued",
+      turnId,
       from,
       prompt,
       options,
       id: generateEventId(),
       timestamp: new Date(),
-    });
+    }
+    result.events.push(queuedEvent);
+    this.publish(queuedEvent);
+    this.recordEvent(queuedEvent);
 
-    this._logger.info(`Queued input from ${from}: ${JSON.stringify(prompt)}`);
+    this._logger.info(`Queued input from ${from}: ${JSON.stringify({ prompt, options })}`);
 
     const promise = this._threadQueue.then(async (thread) => {
       const inputEvent: SharedThreadEvent = {
         type: "input.prompt",
+        turnId,
         from,
         prompt,
         options,
         id: generateEventId(),
         timestamp: new Date(),
       };
+      result.events.push(inputEvent);
       this.publish(inputEvent);
       this.recordEvent(inputEvent);
 
@@ -193,6 +215,7 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
             id: generateEventId(),
             timestamp: new Date(),
           };
+          result.events.push(sharedEvent);
           this.publish(sharedEvent);
           this.recordEvent(sharedEvent);
         }
@@ -200,14 +223,17 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
         if (err.name === "AbortError") {
           const abortEvent: SharedThreadEvent = {
             type: "turn.abort",
+            turnId,
             id: generateEventId(),
             timestamp: new Date(),
           };
+          result.events.push(abortEvent);
           this.publish(abortEvent);
           this.recordEvent(abortEvent);
         } else {
           const errorEvent: SharedThreadEvent = {
             type: "turn.error",
+            turnId,
             error: {
               name: err.name,
               message: err.message,
@@ -215,6 +241,7 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
             id: generateEventId(),
             timestamp: new Date(),
           };
+          result.events.push(errorEvent);
           this.publish(errorEvent);
           this.recordEvent(errorEvent);
         }
@@ -223,6 +250,8 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
       return thread;
     });
     this._threadQueue = promise;
+
+    return promise.then(() => result);
   }
 
   async abort(from: string) {
