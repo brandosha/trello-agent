@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { eq, inArray, sql } from 'drizzle-orm';
 
 import { rootDir, dataDir } from './paths.js';
-import { configTable, permissionsTable } from './db/schema.js';
+import { configTable } from './db/schema.js';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 export * from 'drizzle-orm/sql'
@@ -57,46 +57,6 @@ export function setConfigValues<const K extends string>(entries: Record<K, strin
     .onConflictDoUpdate({
       target: configTable.key,
       set: { value: sql`excluded.value` }
-    })
-    .run();
-}
-
-function serializePermissions(permissions: readonly string[]) {
-  return permissions.join(",");
-}
-
-function parsePermissions(permissions: string) {
-  return permissions.split(",").filter(Boolean);
-}
-
-export function listPermissionValues() {
-  const rows = db.select({
-    userId: permissionsTable.userId,
-    permissions: permissionsTable.permissions,
-  })
-    .from(permissionsTable)
-    .all();
-
-  return Object.fromEntries(
-    rows.map(({ userId, permissions }) => [userId, parsePermissions(permissions)])
-  );
-}
-
-export function getPermissionValues(userId: string) {
-  const permissions = db.select({ permissions: permissionsTable.permissions })
-    .from(permissionsTable)
-    .where(eq(permissionsTable.userId, userId))
-    .get()?.permissions;
-
-  return permissions ? parsePermissions(permissions) : [];
-}
-
-export function setPermissionValues(userId: string, permissions: readonly string[]) {
-  db.insert(permissionsTable)
-    .values({ userId, permissions: serializePermissions(permissions) })
-    .onConflictDoUpdate({
-      target: permissionsTable.userId,
-      set: { permissions: serializePermissions(permissions) }
     })
     .run();
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
-import { getPermissionValues, listPermissionValues, setPermissionValues } from "./database.js";
+import { db, permissionsTable } from "./database.js";
 import { ValueSub } from "./PubSub.js";
 
 const PERMISSION_TYPES = [
@@ -22,20 +23,49 @@ const permissionsIndexSchema = z.record(z.string(), userPermissionListSchema.opt
 export type PermissionsIndex = z.infer<typeof permissionsIndexSchema>;
 
 
+function serializePermissions(permissions: readonly string[]) {
+  return permissions.join(",");
+}
+
+function parsePermissions(permissions: string) {
+  return permissions.split(",").filter(Boolean);
+}
+
+function listPermissionValues() {
+  const rows = db.select({
+    userId: permissionsTable.userId,
+    permissions: permissionsTable.permissions,
+  })
+    .from(permissionsTable)
+    .all();
+
+  return Object.fromEntries(
+    rows.map(({ userId, permissions }) => [userId, parsePermissions(permissions)])
+  );
+}
+
+function getPermissionValues(userId: string) {
+  const permissions = db.select({ permissions: permissionsTable.permissions })
+    .from(permissionsTable)
+    .where(eq(permissionsTable.userId, userId))
+    .get()?.permissions;
+
+  return permissions ? parsePermissions(permissions) : [];
+}
+
+function setPermissionValues(userId: string, permissions: readonly string[]) {
+  db.insert(permissionsTable)
+    .values({ userId, permissions: serializePermissions(permissions) })
+    .onConflictDoUpdate({
+      target: permissionsTable.userId,
+      set: { permissions: serializePermissions(permissions) }
+    })
+    .run();
+}
 
 let permissionsIndex = Promise.resolve(
   permissionsIndexSchema.parse(listPermissionValues())
 );
-
-async function writePermissionsIndex(index: PermissionsIndex): Promise<PermissionsIndex> {
-  permissionsIndex = permissionsIndex.then(async () => {
-    Object.entries(index).forEach(([email, permissions]) => {
-      setPermissionValues(email, permissions ?? []);
-    });
-    return index;
-  });
-  return permissionsIndex;
-}
 
 async function listPermissions(): Promise<PermissionsIndex> {
   return permissionsIndex;
