@@ -19,7 +19,7 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
 
   const clientIdentifier = request.headers["x-trello-client-identifier"];
   if (clientIdentifier === "TrelloAgent/webhook") {
-    return; // Ignore webhooks sent by TrelloAgent itself to avoid loops
+    return; // Ignore webhooks sent by actions triggered by this webhook
   }
 
   const cardId = request.body.action.data.card?.id;
@@ -92,7 +92,7 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
 
   thread.queueInput(multilineString(
     `[system/webhook/trello]`,
-    `Trello action on board "${boardName}" in organization "${orgName}":`,
+    `Trello action for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}":`,
     `X-Trello-Client-Identifier: ${clientIdentifier ?? "none"}`,
     JSON.stringify(request.body.action),
     ``,
