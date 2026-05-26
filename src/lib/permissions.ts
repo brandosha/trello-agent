@@ -1,12 +1,7 @@
-import fs from "fs/promises";
-
 import { z } from "zod";
 
-import { configDir } from "./paths.js";
+import { getPermissionValues, listPermissionValues, setPermissionValues } from "./database.js";
 import { ValueSub } from "./PubSub.js";
-
-const permissionsPath = `${configDir}/permissions.json`;
-// const mkPermissionsDir = fs.mkdir(configDir, { recursive: true });
 
 const PERMISSION_TYPES = [
   'admin',
@@ -28,21 +23,15 @@ export type PermissionsIndex = z.infer<typeof permissionsIndexSchema>;
 
 
 
-let permissionsIndex = (async () => {
-  try {
-    const raw = await fs.readFile(permissionsPath, "utf-8");
-    return JSON.parse(raw) as PermissionsIndex;
-  } catch (err: any) {
-    if (err?.code === "ENOENT") {
-      return {};
-    }
-    throw err;
-  }
-})();
+let permissionsIndex = Promise.resolve(
+  permissionsIndexSchema.parse(listPermissionValues())
+);
 
 async function writePermissionsIndex(index: PermissionsIndex): Promise<PermissionsIndex> {
   permissionsIndex = permissionsIndex.then(async () => {
-    await fs.writeFile(permissionsPath, JSON.stringify(index, null, 2));
+    Object.entries(index).forEach(([email, permissions]) => {
+      setPermissionValues(email, permissions ?? []);
+    });
     return index;
   });
   return permissionsIndex;
@@ -53,7 +42,13 @@ async function listPermissions(): Promise<PermissionsIndex> {
 }
 
 async function getPermissions(email: string): Promise<UserPermissionList> {
-  const permissions = await permissionsIndex.then(index => index[email] ?? []);
+  const index = await permissionsIndex;
+  if (index[email]) {
+    return index[email] ?? [];
+  }
+
+  const permissions = userPermissionListSchema.parse(getPermissionValues(email));
+  index[email] = permissions;
   return permissions;
 }
 
@@ -83,7 +78,7 @@ async function setPermissions(email: string, permissions: UserPermissionList): P
   userPermissionListSchema.parse(permissions);
   const index = await permissionsIndex;
   index[email] = permissions;
-  await writePermissionsIndex(index);
+  setPermissionValues(email, permissions);
 }
 
 export class UserPermissions extends ValueSub<UserPermissionList> {
@@ -92,6 +87,10 @@ export class UserPermissions extends ValueSub<UserPermissionList> {
   constructor(email: string, permissions: UserPermissionList) {
     super(permissions);
     this._email = email;
+  }
+
+  setValue(permissions: UserPermissionList) {
+    super.set(permissions);
   }
 
   async set(permissions: UserPermissionList) {
@@ -111,7 +110,8 @@ class Permissions {
   constructor() {
     permissionsIndex.then(perms => {
       Object.entries(perms).forEach(([email, p]) => {
-        this.forUser(email).set(p!);
+        const userPermissions = this.forUser(email);
+        userPermissions.setValue(p ?? []);
       })
     })
   }
