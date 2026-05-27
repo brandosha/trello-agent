@@ -13,17 +13,7 @@
         return DefaultThreadEvent(this.event);
       },
       isAgentMessageEvent() {
-        const payload = this.routingPayload();
-        const eventType = payload?.type;
-        const itemType = payload?.item?.type;
-        return ['item.started', 'item.updated', 'item.completed'].includes(eventType)
-          && itemType === 'agent_message';
-      },
-      routingPayload() {
-        if (this.event?.type === 'thread.event' && this.event.event) {
-          return this.event.event;
-        }
-        return this.event;
+        return this.event?.item?.type === 'agent_message';
       },
     };
   }
