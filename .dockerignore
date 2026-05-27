@@ -1,0 +1,12 @@
+.git
+.gitignore
+.vscode
+
+node_modules
+dist
+data
+
+.env
+config.ts
+npm-debug.log*
+pnpm-debug.log*

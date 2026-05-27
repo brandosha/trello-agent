@@ -1,11 +1,10 @@
 import { upgradeWebSocket } from "@hono/node-server";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import { WebSocket } from "ws";
 import { z } from "zod";
 
 import { generateAuthToken, verifyAuthToken } from "./auth.js";
 import { codex, SharedThread } from "./codex.js";
-import { logger } from "./Logger.js";
+import { logger } from "./logger.js";
 import {
   trelloIsConfigured,
   getTrelloMember,
@@ -27,14 +26,14 @@ type WsMessage<T> = {
 } & T
 
 class WsClient {
-  ws: WSContext<WebSocket>;
+  ws: WSContext;
   origin: string | undefined;
   email?: string;
   permissions?: UserPermissions
   private _unsubscribePermissions?: Unsubscribe;
   codexThreads = new Map<string, Unsubscribe>();
 
-  constructor(ws: WSContext<WebSocket>, origin: string | undefined) {
+  constructor(ws: WSContext, origin: string | undefined) {
     this.ws = ws;
     this.origin = origin;
     trelloIsConfigured().then(configured => {

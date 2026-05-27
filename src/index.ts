@@ -10,7 +10,7 @@ import { rootDir } from "./lib/paths.js";
 import { websocketHandler } from "./lib/websocket.js";
 import { TRELLO_WEBHOOK_ROUTE, verifyTrelloWebhookRequest } from "./lib/trello.js";
 import { trelloWebhookHandler } from "./lib/webhooks.js";
-import { logger } from "./lib/Logger.js";
+import { logger } from "./lib/logger.js";
 
 
 const app = new Hono();

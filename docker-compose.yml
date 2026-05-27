@@ -1,0 +1,12 @@
+services:
+  trello-agent:
+    build: .
+    image: trello-agent:latest
+    ports:
+      - "7654:7654"
+    volumes:
+      - trello-agent-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  trello-agent-data:
