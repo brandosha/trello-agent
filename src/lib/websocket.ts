@@ -123,6 +123,10 @@ function wsEndpoint<T>(schema: z.ZodSchema<T>, handler: (message: T, client: WsC
   }
 }
 
+function userFrom(email?: string) {
+  return email ? `user/${email}` : "user/unknown";
+}
+
 const trelloSetupSchema = z.object({
   type: z.literal("trello.setup"),
   apiKey: z.string(),
@@ -343,7 +347,7 @@ const abortEndpoint = wsEndpoint(abortMessageSchema, async (message, client) => 
     throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
   }
 
-  codex.thread(threadId).abort(client.email ?? "unk");
+  codex.thread(threadId).abort(userFrom(client.email));
 });
 
 const promptMessageSchema = z.object({
@@ -360,7 +364,7 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) =
     throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
   }
 
-  codex.thread(threadId).promptImmediately(prompt, client.email ?? 'unk')
+  codex.thread(threadId).promptImmediately(prompt, userFrom(client.email))
 });
 
 const permissionsSetSchema = z.object({

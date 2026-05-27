@@ -81,6 +81,25 @@ type SharedThreadEvent = (
   timestamp: Date
 };
 
+function withPromptAttribution(prompt: Input, from: string): Input {
+  const prefix = `[trello-agent/${from}]\n`;
+  if (typeof prompt === "string") {
+    return `${prefix}${prompt}`;
+  }
+
+  const firstTextIndex = prompt.findIndex(item => item.type === "text");
+  if (firstTextIndex === -1) {
+    return [{ type: "text", text: prefix }, ...prompt];
+  }
+
+  return prompt.map((item, index) => {
+    if (index !== firstTextIndex || item.type !== "text") {
+      return item;
+    }
+    return { ...item, text: `${prefix}${item.text}` };
+  });
+}
+
 function generateEventId() {
   return randomStr(5);
 }
@@ -203,7 +222,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
 
       options.signal = this._abortController.signal;
       try {
-        const { events } = await thread.runStreamed(prompt, options);
+        const { events } = await thread.runStreamed(withPromptAttribution(prompt, from), options);
         for await (const event of events) {
           const sharedEvent: SharedThreadEvent = {
             ...event,
