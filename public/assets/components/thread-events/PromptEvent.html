@@ -1,0 +1,42 @@
+<template id="prompt-event-template">
+  <div class="event prompt-event">
+    <div class="meta">
+      <div>{{ timeLabel }}</div>
+      <div v-if="event.from">{{ event.from }}</div>
+    </div>
+    <div>
+      <div class="prompt-message-body">{{ promptText }}</div>
+    </div>
+  </div>
+</template>
+<script>
+  function PromptEvent(event) {
+    return {
+      $template: '#prompt-event-template',
+      event,
+      get timeLabel() {
+        const timestamp = this.event?.timestamp;
+        if (!timestamp) return '--';
+        const date = new Date(timestamp);
+        if (Number.isNaN(date.getTime())) return String(timestamp);
+        return date.toLocaleTimeString();
+      },
+      get promptText() {
+        return this.extractPromptText(this.event?.prompt) || '(empty prompt)';
+      },
+      extractPromptText(prompt) {
+        if (typeof prompt === 'string') return prompt;
+        if (!Array.isArray(prompt)) return '';
+        return prompt
+          .map((item) => {
+            if (typeof item === 'string') return item;
+            if (typeof item?.text === 'string') return item.text;
+            if (typeof item?.content === 'string') return item.content;
+            return '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      },
+    };
+  }
+</script>

@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'TrelloBoards',
     'thread-events/DefaultThreadEvent',
     'thread-events/AgentMessageEvent',
+    'thread-events/PromptEvent',
     'thread-events/ThreadEvent',
     'Thread',
   ].map(importComponent));

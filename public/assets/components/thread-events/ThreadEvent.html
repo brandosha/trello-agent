@@ -7,10 +7,16 @@
       $template: '#thread-event-template',
       event,
       component() {
+        if (this.isPromptEvent()) {
+          return PromptEvent(this.event);
+        }
         if (this.isAgentMessageEvent()) {
           return AgentMessageEvent(this.event);
         }
         return DefaultThreadEvent(this.event);
+      },
+      isPromptEvent() {
+        return this.event?.type === 'input.prompt';
       },
       isAgentMessageEvent() {
         return this.event?.item?.type === 'agent_message';
