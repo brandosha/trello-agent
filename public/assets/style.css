@@ -141,6 +141,13 @@ header {
   white-space: pre-wrap;
 }
 
+.agent-message-body {
+  margin: 6px 0 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
 .event.ok .type { color: var(--ok); }
 .event.warn .type { color: var(--warn); }
 .event.err .type { color: var(--err); }

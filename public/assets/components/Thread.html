@@ -26,18 +26,7 @@
           <div v-if="!authorized" class="badge">Trello authorization required to view this thread.</div>
           <div v-else-if="!canView" class="badge">You do not have permission to view this thread.</div>
           <div v-else class="events" ref="eventsContainer" @scroll="handleScroll">
-            <div v-for="event in filteredEvents" :key="event.id" class="event" :class="event.tone">
-              <div class="meta">
-                <div>Time: {{ event.timeLabel }}</div>
-                <div>ID: {{ event.id }}</div>
-                <div>Thread: {{ event.threadLabel }}</div>
-                <div v-if="event.itemLabel">Item: {{ event.itemLabel }}</div>
-              </div>
-              <div>
-                <div class="type">{{ event.type }}</div>
-                <div class="event-summary">{{ event.summary }}</div>
-              </div>
-            </div>
+            <div v-for="event in filteredEvents" :key="event.id" v-scope="ThreadEvent(event)"></div>
           </div>
         </div>
       </section>
@@ -282,8 +271,8 @@
           this.eventIds[event.id] = true;
           normalized.push(event);
 
-          if (rawEvent?.type) this.addTypeOption(rawEvent.type);
-          if (rawEvent?.type === 'input.prompt') this.inputCount += 1;
+          if (event.type) this.addTypeOption(event.type);
+          if (event.type === 'input.prompt') this.inputCount += 1;
           if (event.tone === 'err') this.errorCount += 1;
         }
 
@@ -314,6 +303,7 @@
         const timeLabel = this.formatTimestamp(payload?.timestamp || message?.timestamp);
         const id = payload?.id || message?.id || this.generateLocalId();
         const threadLabel = message?.threadId || message?.thread_id || payload?.threadId || payload?.thread_id || '--';
+        const item = payload?.item || null;
         const itemLabel = payload?.item?.type
           ? `${payload.item.type}${payload.item.status ? ` (${payload.item.status})` : ''}`
           : '';
@@ -326,6 +316,9 @@
           summary,
           timeLabel,
           threadLabel,
+          payload,
+          raw: message,
+          item,
           itemLabel,
           searchText,
         };

@@ -1,0 +1,23 @@
+<template id="thread-event-template">
+  <div v-scope="component()"></div>
+</template>
+<script>
+  function ThreadEvent(event) {
+    return {
+      $template: '#thread-event-template',
+      event,
+      component() {
+        if (this.isAgentMessageEvent()) {
+          return AgentMessageEvent(this.event);
+        }
+        return DefaultThreadEvent(this.event);
+      },
+      isAgentMessageEvent() {
+        const eventType = this.event?.type;
+        const itemType = this.event?.item?.type || this.event?.payload?.item?.type;
+        return ['item.started', 'item.updated', 'item.completed'].includes(eventType)
+          && itemType === 'agent_message';
+      },
+    };
+  }
+</script>

@@ -39,6 +39,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     'CodexLogin',
     'ServerKey',
     'TrelloBoards',
+    'thread-events/DefaultThreadEvent',
+    'thread-events/AgentMessageEvent',
+    'thread-events/ThreadEvent',
     'Thread',
   ].map(importComponent));
 

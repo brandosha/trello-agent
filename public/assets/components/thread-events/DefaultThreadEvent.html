@@ -1,0 +1,22 @@
+<template id="default-thread-event-template">
+  <div class="event" :class="event.tone">
+    <div class="meta">
+      <div>Time: {{ event.timeLabel }}</div>
+      <div>ID: {{ event.id }}</div>
+      <div>Thread: {{ event.threadLabel }}</div>
+      <div v-if="event.itemLabel">Item: {{ event.itemLabel }}</div>
+    </div>
+    <div>
+      <div class="type">{{ event.type }}</div>
+      <div class="event-summary">{{ event.summary }}</div>
+    </div>
+  </div>
+</template>
+<script>
+  function DefaultThreadEvent(event) {
+    return {
+      $template: '#default-thread-event-template',
+      event,
+    };
+  }
+</script>

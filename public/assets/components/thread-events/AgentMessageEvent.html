@@ -1,0 +1,41 @@
+<template id="agent-message-event-template">
+  <div class="event agent-message-event" :class="event.tone">
+    <div class="meta">
+      <div>Time: {{ event.timeLabel }}</div>
+      <div>ID: {{ event.id }}</div>
+      <div>Thread: {{ event.threadLabel }}</div>
+      <div v-if="event.itemLabel">Item: {{ event.itemLabel }}</div>
+    </div>
+    <div>
+      <div class="type">{{ event.type }}</div>
+      <div class="agent-message-body">{{ messageText }}</div>
+    </div>
+  </div>
+</template>
+<script>
+  function AgentMessageEvent(event) {
+    return {
+      $template: '#agent-message-event-template',
+      event,
+      get messageText() {
+        return this.extractMessageText() || this.event.summary;
+      },
+      extractMessageText() {
+        const item = this.event?.item || this.event?.payload?.item || {};
+        if (typeof item.text === 'string') return item.text;
+        if (typeof item.message === 'string') return item.message;
+        if (typeof item.content === 'string') return item.content;
+        if (Array.isArray(item.content)) {
+          return item.content
+            .map((part) => {
+              if (typeof part === 'string') return part;
+              return part?.text || part?.content || '';
+            })
+            .filter(Boolean)
+            .join('\n');
+        }
+        return '';
+      },
+    };
+  }
+</script>
