@@ -17,6 +17,9 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
+      '@openai/codex':
+        specifier: 0.130.0
+        version: 0.130.0
       '@openai/codex-sdk':
         specifier: ^0.130.0
         version: 0.130.0

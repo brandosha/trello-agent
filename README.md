@@ -25,3 +25,7 @@ with `config.example.ts` as `config.ts`, which sets the server port to `7654`.
 Runtime Trello configuration is stored in the app data directory, so mount
 `/app/data` if you want configuration, database state, and thread workspaces to
 persist across container restarts.
+
+The container also sets `HOME=/app/data`, so Codex CLI authentication and
+session files under `~/.codex` are stored in the same persistent volume.
+Database migrations are copied into the runtime image at `/app/drizzle`.
