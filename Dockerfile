@@ -38,7 +38,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
-  && corepack prepare pnpm@10.33.4 --activate
+  && corepack prepare pnpm@10.33.4 --activate \
+  && mkdir -p "$HOME" \
+  && sed -i 's#^\(root:[^:]*:[^:]*:[^:]*:[^:]*:\)/root:#\1/app/data:#' /etc/passwd
 
 COPY package.json ./
 COPY --from=build /app/node_modules ./node_modules
