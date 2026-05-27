@@ -28,3 +28,10 @@ export const threadEventsTable = sqliteTable("thread_events", {
   index("thread_id_idx").on(table.threadId),
   index("thread_id_type_idx").on(table.threadId, table.type),
 ]);
+
+export const globalLogsTable = sqliteTable("global_logs", {
+  id: int("id").primaryKey({ autoIncrement: true }),
+  level: text("level").notNull(),
+  message: text("message").notNull(),
+  timestamp: int("timestamp", { mode: "timestamp" }).notNull().$default(() => new Date()),
+});
