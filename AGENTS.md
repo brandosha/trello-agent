@@ -7,6 +7,8 @@ These instructions apply to every task handled from an assigned Trello card in t
 - Read the assigned Trello card before making changes, including its title, description, comments, checklist items, labels, due date, and current list.
 - Always create a new branch before editing files. Use a short, descriptive branch name that includes the card number or short link when available.
 - Check the working tree before editing. Do not overwrite or revert changes you did not make unless the card explicitly asks for that.
+- Write the plan in the Trello card before implementation. Include specific checklist items that match the intended work.
+- Wait for approval on the plan before implementing it, unless the card is already in `Review` and the work is limited to addressing review feedback.
 
 ## Work According to the Card List
 
@@ -20,10 +22,15 @@ Use the card's current Trello list as the source of truth for the expected stage
 
 If the card's comments or checklist conflict with its list, treat the list as the workflow stage and use the card content to determine the specific task.
 
+## Card Updates
+
+- Update the Trello card frequently while working so reviewers can see current status without inspecting the branch.
+- Mark checklist items complete as each corresponding task is finished.
+- After each commit, add a card comment describing what changed, the commit hash, what was verified, and any remaining follow-up.
+
 ## Commits and Review
 
 - Commit often in coherent, reviewable chunks. Each commit should leave the repository in a sensible state.
 - Use clear commit messages that describe the change made for the card.
 - Push the branch to `origin` so others can review the work.
 - If tests, builds, or migrations are relevant, run them before pushing and mention the result in the card or handoff.
-
