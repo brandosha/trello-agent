@@ -81,6 +81,25 @@ type SharedThreadEvent = (
   timestamp: Date
 };
 
+function withPromptAttribution(prompt: Input, from: string): Input {
+  const prefix = `[trello-agent/${from}]\n`;
+  if (typeof prompt === "string") {
+    return `${prefix}${prompt}`;
+  }
+
+  const firstTextIndex = prompt.findIndex(item => item.type === "text");
+  if (firstTextIndex === -1) {
+    return [{ type: "text", text: prefix }, ...prompt];
+  }
+
+  return prompt.map((item, index) => {
+    if (index !== firstTextIndex || item.type !== "text") {
+      return item;
+    }
+    return { ...item, text: `${prefix}${item.text}` };
+  });
+}
+
 function generateEventId() {
   return randomStr(5);
 }
@@ -164,8 +183,8 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   }
 
   promptImmediately(prompt: Input, from: string, options: TurnOptions = {}) {
-    this.queueInput(prompt, from, options)
     this.abort(from);
+    return this.queueInput(prompt, from, options);
   }
 
   queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
@@ -203,7 +222,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
 
       options.signal = this._abortController.signal;
       try {
-        const { events } = await thread.runStreamed(prompt, options);
+        const { events } = await thread.runStreamed(withPromptAttribution(prompt, from), options);
         for await (const event of events) {
           const sharedEvent: SharedThreadEvent = {
             ...event,
@@ -249,7 +268,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     return promise.then(() => result);
   }
 
-  async abort(from: string) {
+  abort(from: string) {
     const abortEvent: SharedThreadEvent = {
       type: "input.abort",
       id: generateEventId(),
@@ -257,7 +276,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
       from,
     };
     this.publish(abortEvent);
-    await this.recordEvent(abortEvent);
+    this.recordEvent(abortEvent);
     
     this._abortController.abort();
     this._abortController = new AbortController();
@@ -333,12 +352,10 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     if (event.type === "thread.started" && "thread_id" in event && typeof event.thread_id === "string") {
       this.setCodexThreadId(event.thread_id);
     }
-
-    return Promise.resolve();
   }
 
   destroy() {
-    this._abortController.abort();
+    this.abort('system/destroy');
   }
 }
 
@@ -430,7 +447,7 @@ async function setupDefaultThread() {
     await fs.writeFile(`${workspaceDir}/AGENTS.md`, DEFAULT_AGENT_INSTRUCTIONS);
 
     if (isNew) {
-      defaultThread.queueInput("Introduce yourself.", "system");
+      defaultThread.promptImmediately("Introduce yourself.", "system");
     }
   });
 }

@@ -77,11 +77,18 @@ class BackendClient {
 
 
     this._threadListeners = {};
+    this._threadPageListeners = {};
 
     this.listen('thread.event', ({ threadId, event }) => {
       const listeners = this._threadListeners[threadId];
       if (!listeners || !listeners.length) return;
       listeners.forEach((listener) => listener(event));
+    });
+
+    this.listen('thread.events', (page) => {
+      const listeners = this._threadPageListeners[page.threadId];
+      if (!listeners || !listeners.length) return;
+      listeners.forEach((listener) => listener(page));
     });
   }
 
@@ -99,16 +106,32 @@ class BackendClient {
     return this._ws.listen(listener);
   }
 
-  subscribeThread(threadId, handler) {
+  subscribeThread(threadId, handler, pageHandler) {
     const listeners = this._threadListeners[threadId] || [];
     listeners.push(handler);
     this._threadListeners[threadId] = listeners;
+
+    if (pageHandler) {
+      const pageListeners = this._threadPageListeners[threadId] || [];
+      pageListeners.push(pageHandler);
+      this._threadPageListeners[threadId] = pageListeners;
+    }
+
     this.send('thread.subscribe', { threadId });
 
     return () => {
       const current = this._threadListeners[threadId] || [];
       this._threadListeners[threadId] = current.filter((listener) => listener !== handler);
+
+      if (pageHandler) {
+        const currentPageListeners = this._threadPageListeners[threadId] || [];
+        this._threadPageListeners[threadId] = currentPageListeners.filter((listener) => listener !== pageHandler);
+      }
     };
+  }
+
+  requestThreadEvents(threadId, { limit = 50, offset = 0 } = {}) {
+    this.send('thread.events.list', { threadId, limit, offset });
   }
 }
 
