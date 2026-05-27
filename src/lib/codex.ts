@@ -3,11 +3,12 @@ import fs from "fs/promises";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
+import { and, desc, eq } from "drizzle-orm";
 
 import { rootDir, dataDir, reposDir } from "./paths.js";
-import { HistorySub, Unsubscribe } from "./PubSub.js";
-import { Logger } from "./Logger.js";
+import { HistorySub, PubSub } from "./PubSub.js";
 import { randomStr } from "./utils.js";
+import { db, threadEventsTable, threadsTable } from "./database.js";
 
 
 const codexInterface = new Codex({
@@ -85,19 +86,14 @@ interface SharedThreadTurn {
   events: SharedThreadEvent[];
 }
 
-export class SharedThread extends HistorySub<SharedThreadEvent> {
+export class SharedThread extends PubSub<SharedThreadEvent> {
   id: string;
   workspaceDir: string;
 
   private _threadDir: string;
-  private _filePath: string;
   private _thread: Promise<Thread>;
   private _threadQueue: Promise<Thread>;
-  private _fileAppendQueue: Promise<fs.FileHandle>;
   private _abortController = new AbortController();
-  private _logAppendQueue: Promise<fs.FileHandle>;
-  private _logger = new Logger();
-  private _logUnsubscribe: Unsubscribe;
   // private _pubsub = new PubSub<SharedThreadEvent>();
 
   constructor(id: string, options: ThreadOptions = {}) {
@@ -114,36 +110,11 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     const mkdir = fs.mkdir(this.workspaceDir, { recursive: true });
     options = this.configureOptions(options);
 
-    this._filePath = `${this._threadDir}/thread.jsonl`;
-    this._fileAppendQueue = mkdir.then(() => fs.open(this._filePath, "a"));
-    this._thread = mkdir.then(() => fs.open(this._filePath, "r"))
-      .then(async handle => {
-        let thread: Thread | undefined
-        for await (const line of handle.readLines()) {
-          const event = JSON.parse(line) as SharedThreadEvent;
-          if (event.type === "thread.started") {
-            thread = codexInterface.resumeThread(event.thread_id, options);
-          }
-          this.publish(event);
-        }
-
-        return thread ?? codexInterface.startThread(options);
-      })
-      .catch(err => {
-        if (err.code === "ENOENT") {
-          return codexInterface.startThread(options);
-        }
-        throw err;
-      });
-    this._threadQueue = this._thread;
-
-    this._logAppendQueue = mkdir.then(() => fs.open(`${this._threadDir}/log.jsonl`, "a"));
-    this._logUnsubscribe = this._logger.subscribe(message => {
-      this._logAppendQueue = this._logAppendQueue.then(async handle => {
-        await handle.appendFile(JSON.stringify(message) + "\n");
-        return handle;
-      });
+    this._thread = mkdir.then(() => {
+      this.ensureThreadRecord();
+      return this.loadThread(options);
     });
+    this._threadQueue = this._thread;
   }
 
   private configureOptions(options: ThreadOptions) {
@@ -156,7 +127,26 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
 
   async isNew() {
     await this._thread;
-    return this.history.length === 0;
+    const event = db.select({ id: threadEventsTable.id })
+      .from(threadEventsTable)
+      .where(eq(threadEventsTable.threadId, this.id))
+      .limit(1)
+      .get();
+    return !event;
+  }
+
+  getEvents(limit = 100, offset = 0) {
+    const rows = db.select({ event: threadEventsTable.event })
+      .from(threadEventsTable)
+      .where(eq(threadEventsTable.threadId, this.id))
+      .orderBy(desc(threadEventsTable.id))
+      .limit(limit)
+      .offset(offset)
+      .all();
+
+    return rows
+      .map(({ event }) => event as SharedThreadEvent)
+      .reverse();
   }
 
   async setOptions(options: ThreadOptions) {
@@ -193,9 +183,6 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     result.events.push(queuedEvent);
     this.publish(queuedEvent);
     this.recordEvent(queuedEvent);
-
-    this._logger.info(`Queued input from ${from}: ${JSON.stringify({ prompt, options })}`);
-
     const promise = this._threadQueue.then(async (thread) => {
       const inputEvent: SharedThreadEvent = {
         type: "input.prompt",
@@ -272,20 +259,82 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
     this._abortController = new AbortController();
   }
 
+  private ensureThreadRecord() {
+    const now = new Date();
+    db.insert(threadsTable)
+      .values({
+        id: this.id,
+        codexThreadId: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  private loadThread(options: ThreadOptions) {
+    const threadRecord = db.select({ codexThreadId: threadsTable.codexThreadId })
+      .from(threadsTable)
+      .where(eq(threadsTable.id, this.id))
+      .get();
+
+    let codexThreadId = threadRecord?.codexThreadId;
+    if (!codexThreadId) {
+      const startedEvent = db.select({ event: threadEventsTable.event })
+        .from(threadEventsTable)
+        .where(and(
+          eq(threadEventsTable.threadId, this.id),
+          eq(threadEventsTable.type, "thread.started")
+        ))
+        .orderBy(desc(threadEventsTable.id))
+        .limit(1)
+        .get()?.event as SharedThreadEvent | undefined;
+
+      if (
+        startedEvent?.type === "thread.started"
+        && "thread_id" in startedEvent
+        && typeof startedEvent.thread_id === "string"
+      ) {
+        codexThreadId = startedEvent.thread_id;
+        this.setCodexThreadId(codexThreadId);
+      }
+    }
+
+    return codexThreadId
+      ? codexInterface.resumeThread(codexThreadId, options)
+      : codexInterface.startThread(options);
+  }
+
+  private setCodexThreadId(codexThreadId: string) {
+    db.update(threadsTable)
+      .set({
+        codexThreadId,
+        updatedAt: new Date(),
+      })
+      .where(eq(threadsTable.id, this.id))
+      .run();
+  }
+
   private recordEvent(event: SharedThreadEvent) {
-    const promise = this._fileAppendQueue.then(async (handle) => {
-      await handle.appendFile(JSON.stringify(event) + "\n");
-      return handle;
-    });
-    this._fileAppendQueue = promise;
-    return promise;
+    db.insert(threadEventsTable)
+      .values({
+        threadId: this.id,
+        turnId: "turnId" in event ? event.turnId : null,
+        type: event.type,
+        event,
+        timestamp: event.timestamp,
+      })
+      .run();
+
+    if (event.type === "thread.started" && "thread_id" in event && typeof event.thread_id === "string") {
+      this.setCodexThreadId(event.thread_id);
+    }
+
+    return Promise.resolve();
   }
 
   destroy() {
     this._abortController.abort();
-    this._logUnsubscribe();
-    this._logAppendQueue.then(handle => handle.close());
-    this._fileAppendQueue.then(handle => handle.close());
   }
 }
 
@@ -294,7 +343,7 @@ class CodexSharedThreads {
 
   async threadExists(id: string) {
     try {
-      await fs.access(`${threadsDir}/${id}/thread.jsonl`);
+      await fs.access(`${threadsDir}/${id}/workspace`);
       return true;
     } catch {
       return false;

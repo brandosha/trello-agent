@@ -1,12 +1,8 @@
-import fs from "fs/promises";
-
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 
-import { configDir } from "./paths.js";
+import { db, permissionsTable } from "./database.js";
 import { ValueSub } from "./PubSub.js";
-
-const permissionsPath = `${configDir}/permissions.json`;
-// const mkPermissionsDir = fs.mkdir(configDir, { recursive: true });
 
 const PERMISSION_TYPES = [
   'admin',
@@ -27,33 +23,62 @@ const permissionsIndexSchema = z.record(z.string(), userPermissionListSchema.opt
 export type PermissionsIndex = z.infer<typeof permissionsIndexSchema>;
 
 
-
-let permissionsIndex = (async () => {
-  try {
-    const raw = await fs.readFile(permissionsPath, "utf-8");
-    return JSON.parse(raw) as PermissionsIndex;
-  } catch (err: any) {
-    if (err?.code === "ENOENT") {
-      return {};
-    }
-    throw err;
-  }
-})();
-
-async function writePermissionsIndex(index: PermissionsIndex): Promise<PermissionsIndex> {
-  permissionsIndex = permissionsIndex.then(async () => {
-    await fs.writeFile(permissionsPath, JSON.stringify(index, null, 2));
-    return index;
-  });
-  return permissionsIndex;
+function serializePermissions(permissions: readonly string[]) {
+  return permissions.join(",");
 }
+
+function parsePermissions(permissions: string) {
+  return permissions.split(",").filter(Boolean);
+}
+
+function listPermissionValues() {
+  const rows = db.select({
+    userId: permissionsTable.userId,
+    permissions: permissionsTable.permissions,
+  })
+    .from(permissionsTable)
+    .all();
+
+  return Object.fromEntries(
+    rows.map(({ userId, permissions }) => [userId, parsePermissions(permissions)])
+  );
+}
+
+function getPermissionValues(userId: string) {
+  const permissions = db.select({ permissions: permissionsTable.permissions })
+    .from(permissionsTable)
+    .where(eq(permissionsTable.userId, userId))
+    .get()?.permissions;
+
+  return permissions ? parsePermissions(permissions) : [];
+}
+
+function setPermissionValues(userId: string, permissions: readonly string[]) {
+  db.insert(permissionsTable)
+    .values({ userId, permissions: serializePermissions(permissions) })
+    .onConflictDoUpdate({
+      target: permissionsTable.userId,
+      set: { permissions: serializePermissions(permissions) }
+    })
+    .run();
+}
+
+let permissionsIndex = Promise.resolve(
+  permissionsIndexSchema.parse(listPermissionValues())
+);
 
 async function listPermissions(): Promise<PermissionsIndex> {
   return permissionsIndex;
 }
 
 async function getPermissions(email: string): Promise<UserPermissionList> {
-  const permissions = await permissionsIndex.then(index => index[email] ?? []);
+  const index = await permissionsIndex;
+  if (index[email]) {
+    return index[email] ?? [];
+  }
+
+  const permissions = userPermissionListSchema.parse(getPermissionValues(email));
+  index[email] = permissions;
   return permissions;
 }
 
@@ -83,7 +108,7 @@ async function setPermissions(email: string, permissions: UserPermissionList): P
   userPermissionListSchema.parse(permissions);
   const index = await permissionsIndex;
   index[email] = permissions;
-  await writePermissionsIndex(index);
+  setPermissionValues(email, permissions);
 }
 
 export class UserPermissions extends ValueSub<UserPermissionList> {
@@ -92,6 +117,10 @@ export class UserPermissions extends ValueSub<UserPermissionList> {
   constructor(email: string, permissions: UserPermissionList) {
     super(permissions);
     this._email = email;
+  }
+
+  setValue(permissions: UserPermissionList) {
+    super.set(permissions);
   }
 
   async set(permissions: UserPermissionList) {
@@ -111,7 +140,8 @@ class Permissions {
   constructor() {
     permissionsIndex.then(perms => {
       Object.entries(perms).forEach(([email, p]) => {
-        this.forUser(email).set(p!);
+        const userPermissions = this.forUser(email);
+        userPermissions.setValue(p ?? []);
       })
     })
   }
