@@ -69,7 +69,19 @@
           <div class="panel-header">Controls</div>
           <div class="panel-body">
             <form class="input-row" @submit.prevent="sendPrompt">
-              <input v-model="promptInput" type="text" placeholder="Send input to agent" :disabled="!canPrompt" />
+              <div
+                ref="promptComposer"
+                class="prompt-composer"
+                :class="{ disabled: !canPrompt }"
+                :contenteditable="canPrompt ? 'true' : 'false'"
+                :aria-disabled="!canPrompt"
+                role="textbox"
+                aria-multiline="true"
+                data-placeholder="Send input to agent"
+                @input="handlePromptInput"
+                @keydown="handlePromptKeydown"
+                @paste="handlePromptPaste"
+              ></div>
               <button type="submit" class="btn primary" :disabled="!canPrompt">Send</button>
               <button type="button" class="btn danger" :disabled="!canAbort" @click="sendAbort">Abort</button>
             </form>
@@ -153,11 +165,37 @@
           return matchesText && matchesType;
         });
       },
+      getPromptText() {
+        const composer = this.$refs.promptComposer;
+        const value = composer ? composer.innerText : this.promptInput;
+        return value.replace(/\u00a0/g, ' ').replace(/\r\n/g, '\n');
+      },
+      setPromptText(value) {
+        this.promptInput = value;
+        const composer = this.$refs.promptComposer;
+        if (composer && composer.innerText !== value) {
+          composer.innerText = value;
+        }
+      },
+      handlePromptInput() {
+        this.promptInput = this.getPromptText();
+      },
+      handlePromptKeydown(event) {
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        event.preventDefault();
+        this.sendPrompt();
+      },
+      handlePromptPaste(event) {
+        event.preventDefault();
+        const text = event.clipboardData?.getData('text/plain') || '';
+        document.execCommand('insertText', false, text);
+        this.handlePromptInput();
+      },
       sendPrompt() {
-        const input = this.promptInput.trim();
-        if (!input || !this.backend || !this.canPrompt) return;
+        const input = this.getPromptText();
+        if (!input.trim() || !this.backend || !this.canPrompt) return;
         this.backend.send('thread.prompt', { threadId: this.threadId, prompt: input });
-        this.promptInput = '';
+        this.setPromptText('');
       },
       sendAbort() {
         if (!this.backend || !this.canAbort) return;

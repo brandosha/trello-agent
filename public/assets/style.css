@@ -158,14 +158,41 @@ pre {
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 8px;
+  align-items: end;
 }
 
-.input-row input {
+.input-row input,
+.prompt-composer {
   background: #0c1016;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
+}
+
+.prompt-composer {
+  min-height: 36px;
+  max-height: 180px;
+  overflow: auto;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  outline: none;
+}
+
+.prompt-composer:focus {
+  border-color: var(--accent);
+}
+
+.prompt-composer:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.prompt-composer.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .btn {
