@@ -1,5 +1,5 @@
 import { codex } from "./codex.js";
-import { logger } from "./Logger.js"
+import { logger } from "./logger.js"
 import { TrelloWebhookRequest, getThreadUrl, makeTrelloApiRequest } from "./trello.js";
 import { multilineString } from "./utils.js";
 
