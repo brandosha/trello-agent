@@ -268,7 +268,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     return promise.then(() => result);
   }
 
-  async abort(from: string) {
+  abort(from: string) {
     const abortEvent: SharedThreadEvent = {
       type: "input.abort",
       id: generateEventId(),
@@ -276,7 +276,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
       from,
     };
     this.publish(abortEvent);
-    await this.recordEvent(abortEvent);
+    this.recordEvent(abortEvent);
     
     this._abortController.abort();
     this._abortController = new AbortController();
@@ -352,12 +352,10 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     if (event.type === "thread.started" && "thread_id" in event && typeof event.thread_id === "string") {
       this.setCodexThreadId(event.thread_id);
     }
-
-    return Promise.resolve();
   }
 
   destroy() {
-    this._abortController.abort();
+    this.abort('system/destroy');
   }
 }
 
