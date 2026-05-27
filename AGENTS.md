@@ -24,6 +24,7 @@ If the card's comments or checklist conflict with its list, treat the list as th
 
 ## Card Updates
 
+- When the agent receives a card comment or other feedback, add an acknowledgment comment before beginning work. The acknowledgment should describe what the agent is about to do.
 - Update the Trello card frequently while working so reviewers can see current status without inspecting the branch.
 - Mark checklist items complete as each corresponding task is finished.
 - After each commit, add a card comment describing what changed, the commit hash, what was verified, and any remaining follow-up.
