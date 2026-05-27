@@ -7,107 +7,23 @@
       $template: '#thread-event-template',
       event,
       component() {
-        const viewEvent = this.normalizeEvent(this.event);
-        if (this.isAgentMessageEvent(viewEvent)) {
-          return AgentMessageEvent(viewEvent);
+        if (this.isAgentMessageEvent()) {
+          return AgentMessageEvent(this.event);
         }
-        return DefaultThreadEvent(viewEvent);
+        return DefaultThreadEvent(this.event);
       },
-      isAgentMessageEvent(viewEvent) {
-        const eventType = viewEvent?.type;
-        const itemType = viewEvent?.item?.type || viewEvent?.payload?.item?.type;
+      isAgentMessageEvent() {
+        const payload = this.routingPayload();
+        const eventType = payload?.type;
+        const itemType = payload?.item?.type;
         return ['item.started', 'item.updated', 'item.completed'].includes(eventType)
           && itemType === 'agent_message';
       },
-      normalizeEvent(message) {
-        const payload = this.getEventPayload(message);
-        const type = payload?.type || message?.type || 'event';
-        const tone = this.classifyEvent(message);
-        const summary = this.extractSummary(message);
-        const timeLabel = this.formatTimestamp(payload?.timestamp || message?.timestamp);
-        const id = payload?.id || message?.id || '--';
-        const threadLabel = message?.threadId || message?.thread_id || payload?.threadId || payload?.thread_id || '--';
-        const item = payload?.item || null;
-        const itemLabel = payload?.item?.type
-          ? `${payload.item.type}${payload.item.status ? ` (${payload.item.status})` : ''}`
-          : '';
-
-        return {
-          id,
-          type,
-          tone,
-          summary,
-          timeLabel,
-          threadLabel,
-          payload,
-          raw: message,
-          item,
-          itemLabel,
-        };
-      },
-      getEventPayload(message) {
-        if (message && message.type === 'thread.event' && message.event) {
-          return message.event;
+      routingPayload() {
+        if (this.event?.type === 'thread.event' && this.event.event) {
+          return this.event.event;
         }
-        return message;
-      },
-      classifyEvent(message) {
-        const payload = this.getEventPayload(message);
-        const type = payload?.type || message?.type || 'event';
-        const itemStatus = payload?.item?.status;
-        if (itemStatus === 'failed') return 'err';
-        if (type.includes('error') || type.includes('failed') || type.includes('invalid')) return 'err';
-        if (type.includes('warn') || type.includes('abort')) return 'warn';
-        if (itemStatus === 'completed' || type.includes('completed') || type.includes('started')) return 'ok';
-        return 'info';
-      },
-      extractSummary(message) {
-        const payload = this.getEventPayload(message);
-        if (payload?.type === 'input.prompt' || payload?.type === 'input.prompt.queued') {
-          const prompt = typeof payload.prompt === 'string' ? payload.prompt : JSON.stringify(payload.prompt);
-          return `Prompt: ${prompt}`;
-        }
-        if (payload?.type === 'input.abort') {
-          return `Abort requested by ${payload.from || 'unknown'}`;
-        }
-        if (payload?.type === 'turn.abort') {
-          return 'Turn aborted';
-        }
-        if (payload?.type === 'turn.error') {
-          const name = payload.error?.name || 'Error';
-          const messageText = payload.error?.message || 'Unknown error';
-          return `${name}: ${messageText}`;
-        }
-        if (payload?.type === 'thread.started') {
-          return `Thread started: ${payload.thread_id || payload.threadId || 'unknown'}`;
-        }
-        if (payload?.type === 'turn.started') {
-          return 'Turn started';
-        }
-        if (payload?.type === 'turn.completed' && payload?.usage) {
-          const usage = payload.usage;
-          return `Turn completed (in ${usage.input_tokens}, out ${usage.output_tokens})`;
-        }
-        if (payload?.item?.text) return payload.item.text;
-        if (payload?.item?.type === 'command_execution') {
-          const status = payload.item.status || 'unknown';
-          return `${status}: ${payload.item.command}`;
-        }
-        if (payload?.item?.type) {
-          const status = payload.item.status ? ` (${payload.item.status})` : '';
-          return `${payload.item.type}${status}`;
-        }
-        if (payload?.message) return payload.message;
-        if (payload?.input) return payload.input;
-        if (typeof payload?.type === 'string') return payload.type;
-        if (typeof message?.type === 'string') return message.type;
-        return 'Event received';
-      },
-      formatTimestamp(value) {
-        if (!value) return '--';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return String(value);
-        return date.toLocaleTimeString();
+        return this.event;
       },
     };
   }

@@ -1,13 +1,13 @@
 <template id="agent-message-event-template">
-  <div class="event agent-message-event" :class="event.tone">
+  <div class="event agent-message-event" :class="tone">
     <div class="meta">
-      <div>Time: {{ event.timeLabel }}</div>
-      <div>ID: {{ event.id }}</div>
-      <div>Thread: {{ event.threadLabel }}</div>
-      <div v-if="event.itemLabel">Item: {{ event.itemLabel }}</div>
+      <div>Time: {{ timeLabel }}</div>
+      <div>ID: {{ eventId }}</div>
+      <div>Thread: {{ threadLabel }}</div>
+      <div v-if="itemLabel">Item: {{ itemLabel }}</div>
     </div>
     <div>
-      <div class="type">{{ event.type }}</div>
+      <div class="type">{{ eventType }}</div>
       <div class="agent-message-body">{{ messageText }}</div>
     </div>
   </div>
@@ -17,16 +17,54 @@
     return {
       $template: '#agent-message-event-template',
       event,
+      get payload() {
+        if (this.event?.type === 'thread.event' && this.event.event) {
+          return this.event.event;
+        }
+        return this.event || {};
+      },
+      get item() {
+        return this.payload?.item || {};
+      },
+      get eventType() {
+        return this.payload?.type || this.event?.type || 'event';
+      },
+      get eventId() {
+        return this.payload?.id || this.event?.id || '--';
+      },
+      get threadLabel() {
+        return this.event?.threadId
+          || this.event?.thread_id
+          || this.payload?.threadId
+          || this.payload?.thread_id
+          || '--';
+      },
+      get timeLabel() {
+        const value = this.payload?.timestamp || this.event?.timestamp;
+        if (!value) return '--';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleTimeString();
+      },
+      get itemLabel() {
+        if (!this.item?.type) return '';
+        return `${this.item.type}${this.item.status ? ` (${this.item.status})` : ''}`;
+      },
+      get tone() {
+        if (this.item?.status === 'failed') return 'err';
+        if (this.item?.status === 'completed' || this.eventType.includes('completed')) return 'ok';
+        if (this.eventType.includes('started')) return 'ok';
+        return 'info';
+      },
       get messageText() {
-        return this.extractMessageText() || this.event.summary;
+        return this.extractMessageText() || '(empty agent message)';
       },
       extractMessageText() {
-        const item = this.event?.item || this.event?.payload?.item || {};
-        if (typeof item.text === 'string') return item.text;
-        if (typeof item.message === 'string') return item.message;
-        if (typeof item.content === 'string') return item.content;
-        if (Array.isArray(item.content)) {
-          return item.content
+        if (typeof this.item.text === 'string') return this.item.text;
+        if (typeof this.item.message === 'string') return this.item.message;
+        if (typeof this.item.content === 'string') return this.item.content;
+        if (Array.isArray(this.item.content)) {
+          return this.item.content
             .map((part) => {
               if (typeof part === 'string') return part;
               return part?.text || part?.content || '';

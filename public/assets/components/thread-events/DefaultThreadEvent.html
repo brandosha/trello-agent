@@ -1,14 +1,14 @@
 <template id="default-thread-event-template">
-  <div class="event" :class="event.tone">
+  <div class="event" :class="tone">
     <div class="meta">
-      <div>Time: {{ event.timeLabel }}</div>
-      <div>ID: {{ event.id }}</div>
-      <div>Thread: {{ event.threadLabel }}</div>
-      <div v-if="event.itemLabel">Item: {{ event.itemLabel }}</div>
+      <div>Time: {{ timeLabel }}</div>
+      <div>ID: {{ eventId }}</div>
+      <div>Thread: {{ threadLabel }}</div>
+      <div v-if="itemLabel">Item: {{ itemLabel }}</div>
     </div>
     <div>
-      <div class="type">{{ event.type }}</div>
-      <div class="event-summary">{{ event.summary }}</div>
+      <div class="type">{{ eventType }}</div>
+      <pre>{{ rawJson }}</pre>
     </div>
   </div>
 </template>
@@ -17,6 +17,49 @@
     return {
       $template: '#default-thread-event-template',
       event,
+      get payload() {
+        if (this.event?.type === 'thread.event' && this.event.event) {
+          return this.event.event;
+        }
+        return this.event || {};
+      },
+      get eventType() {
+        return this.payload?.type || this.event?.type || 'event';
+      },
+      get eventId() {
+        return this.payload?.id || this.event?.id || '--';
+      },
+      get threadLabel() {
+        return this.event?.threadId
+          || this.event?.thread_id
+          || this.payload?.threadId
+          || this.payload?.thread_id
+          || '--';
+      },
+      get timeLabel() {
+        const value = this.payload?.timestamp || this.event?.timestamp;
+        if (!value) return '--';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleTimeString();
+      },
+      get itemLabel() {
+        const item = this.payload?.item;
+        if (!item?.type) return '';
+        return `${item.type}${item.status ? ` (${item.status})` : ''}`;
+      },
+      get tone() {
+        const type = this.eventType;
+        const itemStatus = this.payload?.item?.status;
+        if (itemStatus === 'failed') return 'err';
+        if (type.includes('error') || type.includes('failed') || type.includes('invalid')) return 'err';
+        if (type.includes('warn') || type.includes('abort')) return 'warn';
+        if (itemStatus === 'completed' || type.includes('completed') || type.includes('started')) return 'ok';
+        return 'info';
+      },
+      get rawJson() {
+        return JSON.stringify(this.payload, null, 2);
+      },
     };
   }
 </script>
