@@ -27,5 +27,7 @@ Runtime Trello configuration is stored in the app data directory, so mount
 persist across container restarts.
 
 The container also sets `HOME=/app/data`, so Codex CLI authentication and
-session files under `~/.codex` are stored in the same persistent volume.
+session files under `~/.codex` are stored in the same persistent volume. The
+runtime image also sets root's home directory to `/app/data`, so OpenSSH looks
+for default keys and known hosts under `/app/data/.ssh`.
 Database migrations are copied into the runtime image at `/app/drizzle`.
