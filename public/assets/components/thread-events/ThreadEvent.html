@@ -13,6 +13,9 @@
         if (this.isAgentMessageEvent()) {
           return AgentMessageEvent(this.event);
         }
+        if (this.isCommandExecutionEvent()) {
+          return CommandExecutionEvent(this.event);
+        }
         return DefaultThreadEvent(this.event);
       },
       isPromptEvent() {
@@ -20,6 +23,9 @@
       },
       isAgentMessageEvent() {
         return this.event?.item?.type === 'agent_message';
+      },
+      isCommandExecutionEvent() {
+        return this.event?.item?.type === 'command_execution';
       },
     };
   }

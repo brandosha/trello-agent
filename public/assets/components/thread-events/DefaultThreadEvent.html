@@ -1,7 +1,7 @@
 <template id="default-thread-event-template">
   <div v-if="!isHidden" class="event" class="info" @click="showRawJson = !showRawJson">
     <div class="meta">
-      <div>{{ timeLabel }}</div>
+      <div>{{ timeLabel(event.timestamp) }}</div>
       <div>{{ event.type }}</div>
     </div>
     <div v-if="showRawJson" class="raw-json">
@@ -16,13 +16,6 @@
       event,
       rawJson: JSON.stringify(event, null, 2),
       showRawJson: false,
-      get timeLabel() {
-        const value = this.event?.timestamp;
-        if (!value) return '--';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return String(value);
-        return date.toLocaleTimeString();
-      },
       get isHidden() {
         return [
           'input.prompt.queued',

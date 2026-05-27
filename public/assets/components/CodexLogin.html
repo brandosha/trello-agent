@@ -23,13 +23,9 @@
       outputHtml: '',
       running: false,
       statusLabel: 'Idle',
-      ansi: null,
       mounted() {
         this.backend = app.backend;
         if (!this.backend) return;
-        if (window.AnsiUp) {
-          this.ansi = new window.AnsiUp();
-        }
         this.backend.listen('codex.login.started', () => {
           this.running = true;
           this.statusLabel = 'Running';
@@ -73,8 +69,8 @@
       },
       appendOutput(text) {
         if (!text) return;
-        if (this.ansi) {
-          this.outputHtml += this.ansi.ansi_to_html(text);
+        if (ansi) {
+          this.outputHtml += ansi.ansi_to_html(text);
         } else {
           this.outputHtml += text
             .replace(/&/g, '&amp;')

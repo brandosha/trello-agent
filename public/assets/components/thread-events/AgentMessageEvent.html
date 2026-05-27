@@ -1,7 +1,7 @@
 <template id="agent-message-event-template">
   <div class="event agent-message-event">
     <div class="meta">
-      <div>{{ timeLabel }}</div>
+      <div>{{ timeLabel(event.timestamp) }}</div>
     </div>
     <div>
       <div class="agent-message-body">{{ item.text }}</div>
@@ -15,13 +15,6 @@
       $template: '#agent-message-event-template',
       event,
       item: event.item,
-      get timeLabel() {
-        const timestamp = this.event?.timestamp;
-        if (!timestamp) return '--';
-        const date = new Date(timestamp);
-        if (Number.isNaN(date.getTime())) return String(timestamp);
-        return date.toLocaleTimeString();
-      },
     };
   }
 </script>

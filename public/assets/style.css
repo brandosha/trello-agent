@@ -144,6 +144,38 @@ header {
 .event.warn .type { color: var(--warn); }
 .event.err .type { color: var(--err); }
 
+.command-event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.command-line {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: #dbe3ee;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.output-toggle {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.command-output {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0c1016;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: #dbe3ee;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 pre {
   margin: 0;
   white-space: pre-wrap;
