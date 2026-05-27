@@ -28,6 +28,7 @@ RUN pnpm prune --prod
 FROM node:22-slim AS runtime
 
 ENV NODE_ENV=production
+ENV HOME=/app/data
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
@@ -43,6 +44,7 @@ COPY package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/public ./public
+COPY drizzle ./drizzle
 
 VOLUME ["/app/data"]
 EXPOSE 7654
