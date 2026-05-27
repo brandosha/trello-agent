@@ -183,8 +183,8 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   }
 
   promptImmediately(prompt: Input, from: string, options: TurnOptions = {}) {
-    this.queueInput(prompt, from, options)
     this.abort(from);
+    return this.queueInput(prompt, from, options);
   }
 
   queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
