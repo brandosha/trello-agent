@@ -21,6 +21,9 @@ import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
 
+const INITIAL_THREAD_EVENT_LIMIT = 50;
+const MAX_THREAD_EVENT_LIMIT = 200;
+
 type WsMessage<T> = {
   type: string
 } & T
@@ -240,6 +243,16 @@ const subscribeMessageSchema = z.object({
   threadId: z.string(),
 });
 
+function getThreadEventPage(thread: SharedThread, limit: number, offset: number) {
+  const events = thread.getEvents(limit + 1, offset);
+  const hasMore = events.length > limit;
+
+  return {
+    events: hasMore ? events.slice(1) : events,
+    hasMore,
+  };
+}
+
 const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, client) => {
   const { threadId } = message;
 
@@ -272,12 +285,48 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, cli
   });
   client.codexThreads.set(threadId, unsubscribe);
 
-  thread.getEvents(100).forEach(event => {
-    client.send({
-      type: "thread.event",
-      threadId,
-      event
-    });
+  const page = getThreadEventPage(thread, INITIAL_THREAD_EVENT_LIMIT, 0);
+  client.send({
+    type: "thread.events",
+    threadId,
+    offset: 0,
+    limit: INITIAL_THREAD_EVENT_LIMIT,
+    nextOffset: page.events.length,
+    events: page.events,
+    hasMore: page.hasMore,
+  });
+});
+
+const threadEventsListSchema = z.object({
+  type: z.literal("thread.events.list"),
+  threadId: z.string(),
+  limit: z.number().int().min(1).max(MAX_THREAD_EVENT_LIMIT).optional(),
+  offset: z.number().int().min(0).optional(),
+});
+
+const threadEventsListEndpoint = wsEndpoint(threadEventsListSchema, async (message, client) => {
+  const { threadId } = message;
+
+  await client.checkPermissions(['thread.view']);
+
+  const exists = await codex.threadExists(threadId);
+  if (!exists) {
+    logger.warn(`Client attempted to list events for non-existent thread: ${threadId}`);
+    throw new WsError("THREAD_NOT_FOUND", `Thread ${threadId} does not exist.`);
+  }
+
+  const limit = message.limit ?? INITIAL_THREAD_EVENT_LIMIT;
+  const offset = message.offset ?? 0;
+  const page = getThreadEventPage(codex.thread(threadId), limit, offset);
+
+  client.send({
+    type: "thread.events",
+    threadId,
+    offset,
+    limit,
+    nextOffset: offset + page.events.length,
+    events: page.events,
+    hasMore: page.hasMore,
   });
 });
 
@@ -500,6 +549,7 @@ const endpoints: Record<string, WsMessageHandler> = {
   "ssh.public_key": sshPublicKeyEndpoint,
   "thread.create": threadCreateEndpoint,
   "thread.subscribe": subscribeEndpoint,
+  "thread.events.list": threadEventsListEndpoint,
   "thread.prompt": promptEndpoint,
   "thread.abort": abortEndpoint,
   "permissions.set": permissionsSetEndpoint,

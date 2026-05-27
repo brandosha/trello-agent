@@ -25,7 +25,7 @@
         <div class="panel-body">
           <div v-if="!authorized" class="badge">Trello authorization required to view this thread.</div>
           <div v-else-if="!canView" class="badge">You do not have permission to view this thread.</div>
-          <div v-else class="events" ref="eventsContainer">
+          <div v-else class="events" ref="eventsContainer" @scroll="handleScroll">
             <div v-for="event in filteredEvents" :key="event.id" class="event" :class="event.tone">
               <div class="meta">
                 <div>Time: {{ event.timeLabel }}</div>
@@ -93,10 +93,16 @@
       autoscroll: true,
       typeOptions: [],
       events: [],
+      eventIds: Object.create(null),
       filteredEvents: [],
       inputCount: 0,
       errorCount: 0,
       promptInput: '',
+      historicalLimit: 50,
+      historicalLoaded: 0,
+      hasOlderEvents: true,
+      loadingOlderEvents: false,
+      initialHistoryLoaded: false,
       subscribed: false,
       connected: false,
       authorized: false,
@@ -164,13 +170,105 @@
       subscribeToThread() {
         if (this.subscribed || !this.backend || !this.authorized || !this.canView) return;
         this.subscribed = true;
-        this.backend.subscribeThread(this.threadId, (message) => this.handleEvent(message));
+        this.backend.subscribeThread(
+          this.threadId,
+          (event) => this.handleLiveEvent(event),
+          (page) => this.handleHistoryPage(page)
+        );
       },
-      handleEvent(message) {
+      handleScroll() {
+        const container = this.$refs.eventsContainer;
+        if (!container || container.scrollTop > 80) return;
+        this.loadOlderEvents();
+      },
+      loadOlderEvents() {
+        if (!this.backend || !this.initialHistoryLoaded || this.loadingOlderEvents || !this.hasOlderEvents) {
+          return;
+        }
+
+        this.loadingOlderEvents = true;
+        this.backend.requestThreadEvents(this.threadId, {
+          limit: this.historicalLimit,
+          offset: this.historicalLoaded,
+        });
+      },
+      handleLiveEvent(event) {
         if (!this.connected) {
           this.connected = true;
           this.setConnection('Connected', 'var(--ok)');
         }
+        this.mergeEvents([event], 'append');
+
+        this.syncEventStats();
+        this.applyFilters();
+
+        if (this.autoscroll) {
+          setTimeout(() => {
+            const container = this.$refs.eventsContainer;
+            const last = container?.lastElementChild;
+            if (last) last.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          }, 0);
+        }
+      },
+      handleHistoryPage(page) {
+        if (!this.connected) {
+          this.connected = true;
+          this.setConnection('Connected', 'var(--ok)');
+        }
+
+        const position = page.offset > 0 ? 'prepend' : 'append';
+        this.mergeEvents(page.events || [], position);
+        const nextOffset = page.nextOffset ?? (page.offset || 0) + (page.events?.length || 0);
+        this.historicalLoaded = Math.max(this.historicalLoaded, nextOffset);
+        this.hasOlderEvents = !!page.hasMore;
+        this.loadingOlderEvents = false;
+        this.initialHistoryLoaded = true;
+
+        this.syncEventStats();
+        this.applyFilters();
+
+        if (position === 'append' && this.autoscroll) {
+          setTimeout(() => {
+            const container = this.$refs.eventsContainer;
+            if (container) container.scrollTop = container.scrollHeight;
+          }, 0);
+        }
+      },
+      mergeEvents(rawEvents, position) {
+        if (!Array.isArray(rawEvents) || !rawEvents.length) return 0;
+
+        const normalized = [];
+        for (const rawEvent of rawEvents) {
+          const event = this.normalizeEvent(rawEvent);
+          if (this.eventIds[event.id]) continue;
+          this.eventIds[event.id] = true;
+          normalized.push(event);
+
+          if (rawEvent?.type) this.addTypeOption(rawEvent.type);
+          if (rawEvent?.type === 'input.prompt') this.inputCount += 1;
+          if (event.tone === 'err') this.errorCount += 1;
+        }
+
+        if (!normalized.length) return 0;
+
+        if (position === 'prepend') {
+          const container = this.$refs.eventsContainer;
+          const previousHeight = container?.scrollHeight ?? 0;
+          const previousTop = container?.scrollTop ?? 0;
+
+          this.events.unshift(...normalized);
+
+          setTimeout(() => {
+            if (!container) return;
+            container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
+          }, 0);
+        } else {
+          this.events.push(...normalized);
+        }
+
+        return normalized.length;
+      },
+      normalizeEvent(message) {
         const payload = this.getEventPayload(message);
         const type = payload?.type || message?.type || 'event';
         const tone = this.classifyEvent(message);
@@ -183,7 +281,7 @@
           : '';
         const searchText = JSON.stringify(payload || message).toLowerCase();
 
-        this.events.push({
+        return {
           id,
           type,
           tone,
@@ -192,22 +290,7 @@
           threadLabel,
           itemLabel,
           searchText,
-        });
-
-        if (payload?.type) this.addTypeOption(payload.type);
-        if (payload?.type === 'input.prompt') this.inputCount += 1;
-        if (tone === 'err') this.errorCount += 1;
-
-        this.syncEventStats();
-        this.applyFilters();
-
-        if (this.autoscroll) {
-          setTimeout(() => {
-            const container = this.$refs.eventsContainer;
-            const last = container?.lastElementChild;
-            if (last) last.scrollIntoView({ behavior: 'smooth', block: 'end' });
-          }, 0);
-        }
+        };
       },
       addTypeOption(type) {
         if (this.typeOptions.includes(type)) return;
