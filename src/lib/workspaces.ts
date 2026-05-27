@@ -56,4 +56,5 @@ export async function addDetachedGitWorktree({ location, repo, branch }: AddWork
 
   await execFile('git', ['fetch', 'origin', branch], { cwd: bareRepoDir });
   await execFile('git', ['worktree', 'add', '--detach', location, `origin/${branch}`], { cwd: bareRepoDir });
+  await execFile('git', ['config', 'user.name', 'trello-agent'], { cwd: location });
 }
