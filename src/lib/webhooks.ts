@@ -90,7 +90,7 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     console.log(`Created a new thread for Trello card ${cardId}`);
   }
 
-  thread.queueInput(multilineString(
+  thread.promptImmediately(multilineString(
     `[system/webhook/trello]`,
     `Trello action for card "${cardName}" in list "${listName}" on board "${boardName}" in organization "${orgName}":`,
     `X-Trello-Client-Identifier: ${clientIdentifier ?? "none"}`,

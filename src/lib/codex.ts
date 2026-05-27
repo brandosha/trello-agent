@@ -430,7 +430,7 @@ async function setupDefaultThread() {
     await fs.writeFile(`${workspaceDir}/AGENTS.md`, DEFAULT_AGENT_INSTRUCTIONS);
 
     if (isNew) {
-      defaultThread.queueInput("Introduce yourself.", "system");
+      defaultThread.promptImmediately("Introduce yourself.", "system");
     }
   });
 }

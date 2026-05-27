@@ -360,7 +360,7 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) =
     throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
   }
 
-  codex.thread(threadId).queueInput(prompt, client.email ?? 'unk')
+  codex.thread(threadId).promptImmediately(prompt, client.email ?? 'unk')
 });
 
 const permissionsSetSchema = z.object({
