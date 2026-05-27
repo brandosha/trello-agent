@@ -5,10 +5,10 @@ These instructions apply to every task handled from an assigned Trello card in t
 ## Start of Work
 
 - Read the assigned Trello card before making changes, including its title, description, comments, checklist items, labels, due date, and current list.
-- Always create a new branch before editing files. Use a short, descriptive branch name that includes the card number or short link when available.
+- Always create a new branch before editing files. Use regular branch naming conventions, such as `refactor/sqlite`, and do not include Trello, card numbers, or card short links in the branch name.
 - Check the working tree before editing. Do not overwrite or revert changes you did not make unless the card explicitly asks for that.
 - Write the plan in the Trello card before implementation. Include specific checklist items that match the intended work.
-- Wait for approval on the plan before implementing it, unless the card is already in `Review` and the work is limited to addressing review feedback.
+- Wait for approval on the plan before implementing it. Approval may be shown by an explicit comment or by the card moving from `Planning` to `In Progress`.
 
 ## Work According to the Card List
 
