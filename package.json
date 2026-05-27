@@ -16,6 +16,7 @@
     "@cfworker/json-schema": "^4.1.1",
     "@hono/node-server": "^2.0.2",
     "@modelcontextprotocol/server": "^2.0.0-alpha.2",
+    "@openai/codex": "0.130.0",
     "@openai/codex-sdk": "^0.130.0",
     "better-sqlite3": "^12.10.0",
     "drizzle-orm": "^0.45.2",

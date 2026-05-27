@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "fs";
 import fs from "fs/promises";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
+import path from "path";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 import { and, desc, eq } from "drizzle-orm";
@@ -29,6 +30,9 @@ const codexInterface = new Codex({
     }
   }
 });
+
+const codexCliPath = process.env.CODEX_CLI_PATH
+  ?? path.join(rootDir, "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
 
 const threadsDir = `${dataDir}/threads`;
 if (!existsSync(threadsDir)) {
@@ -374,7 +378,7 @@ class CodexSharedThreads {
     }
 
     const login = this._login = {
-      process: spawn("codex", ["login", "--device-auth"], {
+      process: spawn(codexCliPath, ["login", "--device-auth"], {
         env: process.env,
         timeout: 600000
       }),
