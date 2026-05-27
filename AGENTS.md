@@ -35,3 +35,9 @@ If the card's comments or checklist conflict with its list, treat the list as th
 - Use clear commit messages that describe the change made for the card.
 - Push the branch to `origin` so others can review the work.
 - If tests, builds, or migrations are relevant, run them before pushing and mention the result in the card or handoff.
+
+## Merging
+
+- Only merge a branch into `main` when explicitly asked to do so.
+- When merging into `main`, always use `git merge --no-ff`.
+- After merging, push `main` to `origin` and add a card comment with the merge commit, verification performed, and any follow-up.
