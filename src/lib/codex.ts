@@ -3,10 +3,10 @@ import fs from "fs/promises";
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
-import { asc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import { rootDir, dataDir, reposDir } from "./paths.js";
-import { HistorySub } from "./PubSub.js";
+import { HistorySub, PubSub } from "./PubSub.js";
 import { randomStr } from "./utils.js";
 import { db, threadEventsTable, threadsTable } from "./database.js";
 
@@ -86,7 +86,7 @@ interface SharedThreadTurn {
   events: SharedThreadEvent[];
 }
 
-export class SharedThread extends HistorySub<SharedThreadEvent> {
+export class SharedThread extends PubSub<SharedThreadEvent> {
   id: string;
   workspaceDir: string;
 
@@ -133,6 +133,20 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
       .limit(1)
       .get();
     return !event;
+  }
+
+  getEvents(limit = 100, offset = 0) {
+    const rows = db.select({ event: threadEventsTable.event })
+      .from(threadEventsTable)
+      .where(eq(threadEventsTable.threadId, this.id))
+      .orderBy(desc(threadEventsTable.id))
+      .limit(limit)
+      .offset(offset)
+      .all();
+
+    return rows
+      .map(({ event }) => event as SharedThreadEvent)
+      .reverse();
   }
 
   async setOptions(options: ThreadOptions) {
@@ -265,25 +279,26 @@ export class SharedThread extends HistorySub<SharedThreadEvent> {
       .get();
 
     let codexThreadId = threadRecord?.codexThreadId;
-    const rows = db.select({ event: threadEventsTable.event })
-      .from(threadEventsTable)
-      .where(eq(threadEventsTable.threadId, this.id))
-      .orderBy(asc(threadEventsTable.id))
-      .all();
+    if (!codexThreadId) {
+      const startedEvent = db.select({ event: threadEventsTable.event })
+        .from(threadEventsTable)
+        .where(and(
+          eq(threadEventsTable.threadId, this.id),
+          eq(threadEventsTable.type, "thread.started")
+        ))
+        .orderBy(desc(threadEventsTable.id))
+        .limit(1)
+        .get()?.event as SharedThreadEvent | undefined;
 
-    rows.forEach(({ event }) => {
-      const sharedEvent = event as SharedThreadEvent;
       if (
-        !codexThreadId
-        && sharedEvent.type === "thread.started"
-        && "thread_id" in sharedEvent
-        && typeof sharedEvent.thread_id === "string"
+        startedEvent?.type === "thread.started"
+        && "thread_id" in startedEvent
+        && typeof startedEvent.thread_id === "string"
       ) {
-        codexThreadId = sharedEvent.thread_id;
+        codexThreadId = startedEvent.thread_id;
         this.setCodexThreadId(codexThreadId);
       }
-      this.publish(sharedEvent);
-    });
+    }
 
     return codexThreadId
       ? codexInterface.resumeThread(codexThreadId, options)

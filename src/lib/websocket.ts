@@ -272,6 +272,14 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, cli
     });
   });
   client.codexThreads.set(threadId, unsubscribe);
+
+  thread.getEvents(100).forEach(event => {
+    client.send({
+      type: "thread.event",
+      threadId,
+      event
+    });
+  });
 });
 
 const abortMessageSchema = z.object({
