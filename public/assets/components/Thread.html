@@ -10,50 +10,20 @@
       <section class="panel">
         <div class="panel-header">
           <div class="badge" :style="{ color: connectionColor }">{{ connectionStatus }}</div>
-          <div class="filters">
-            <input v-model="filterText" type="text" placeholder="Filter text" @input="applyFilters" />
-            <select v-model="filterType" @change="applyFilters">
-              <option value="">All types</option>
-              <option v-for="type in typeOptions" :key="type" :value="type">{{ type }}</option>
-            </select>
-            <label class="badge">
-              <input v-model="autoscroll" type="checkbox" />
-              Auto-scroll
-            </label>
-          </div>
+          <label class="badge">
+            <input v-model="autoscroll" type="checkbox" />
+            Auto-scroll
+          </label>
         </div>
         <div class="panel-body">
           <div v-if="!authorized" class="badge">Trello authorization required to view this thread.</div>
           <div v-else-if="!canView" class="badge">You do not have permission to view this thread.</div>
           <div v-else class="events" ref="eventsContainer" @scroll="handleScroll">
-            <div v-for="event in filteredEvents" :key="event.id" v-scope="ThreadEvent(event)"></div>
+            <div v-for="event in events" :key="event.id" v-scope="ThreadEvent(event)"></div>
           </div>
         </div>
       </section>
       <aside class="stack">
-        <section class="panel">
-          <div class="panel-header">
-            <div>Session</div>
-          </div>
-          <div class="panel-body stat-grid">
-            <div class="stat">
-              <div class="label">Total events</div>
-              <div class="value">{{ totalEvents }}</div>
-            </div>
-            <div class="stat">
-              <div class="label">Last event</div>
-              <div class="value">{{ lastEventTime }}</div>
-            </div>
-            <div class="stat">
-              <div class="label">Inputs sent</div>
-              <div class="value">{{ inputCount }}</div>
-            </div>
-            <div class="stat">
-              <div class="label">Errors</div>
-              <div class="value">{{ errorCount }}</div>
-            </div>
-          </div>
-        </section>
         <section class="panel" v-if="authorized && canView">
           <div class="panel-header">Controls</div>
           <div class="panel-body">
@@ -89,15 +59,9 @@
       threadLabel: '(loading...)',
       connectionStatus: 'Connecting...',
       connectionColor: 'var(--muted)',
-      filterText: '',
-      filterType: '',
       autoscroll: true,
-      typeOptions: [],
       events: [],
       eventIds: Object.create(null),
-      filteredEvents: [],
-      inputCount: 0,
-      errorCount: 0,
       promptInput: '',
       historicalLimit: 50,
       historicalLoaded: 0,
@@ -110,8 +74,6 @@
       canView: false,
       canPrompt: false,
       canAbort: false,
-      totalEvents: 0,
-      lastEventTime: '--',
       mounted() {
         this.threadLabel = this.threadId || '(none)';
         this.backend = app.backend;
@@ -122,8 +84,6 @@
         this.backend.listen('auth.success', () => this.handleAuthUpdate());
 
         this.syncAuthState();
-        this.applyFilters();
-        this.syncEventStats();
         this.subscribeToThread();
       },
       setConnection(status, color) {
@@ -136,23 +96,6 @@
         this.canView = auth?.hasPermission ? auth.hasPermission('thread.view') : false;
         this.canPrompt = auth?.hasPermission ? auth.hasPermission('thread.prompt') : false;
         this.canAbort = auth?.hasPermission ? auth.hasPermission('thread.abort') : false;
-      },
-      syncEventStats() {
-        this.totalEvents = this.events.length;
-        if (!this.events.length) {
-          this.lastEventTime = '--';
-          return;
-        }
-        this.lastEventTime = this.events[this.events.length - 1].timeLabel || '--';
-      },
-      applyFilters() {
-        const text = this.filterText.trim().toLowerCase();
-        const type = this.filterType;
-        this.filteredEvents = this.events.filter((event) => {
-          const matchesText = !text || event.searchText.includes(text);
-          const matchesType = !type || event.type === type;
-          return matchesText && matchesType;
-        });
       },
       getPromptText() {
         const composer = this.$refs.promptComposer;
@@ -226,9 +169,6 @@
         }
         this.mergeEvents([event], 'append');
 
-        this.syncEventStats();
-        this.applyFilters();
-
         if (this.autoscroll) {
           setTimeout(() => {
             const container = this.$refs.eventsContainer;
@@ -251,9 +191,6 @@
         this.loadingOlderEvents = false;
         this.initialHistoryLoaded = true;
 
-        this.syncEventStats();
-        this.applyFilters();
-
         if (position === 'append' && this.autoscroll) {
           setTimeout(() => {
             const container = this.$refs.eventsContainer;
@@ -264,135 +201,34 @@
       mergeEvents(rawEvents, position) {
         if (!Array.isArray(rawEvents) || !rawEvents.length) return 0;
 
-        const normalized = [];
+        const uniqueEvents = [];
         for (const rawEvent of rawEvents) {
-          const event = this.normalizeEvent(rawEvent);
-          if (this.eventIds[event.id]) continue;
-          this.eventIds[event.id] = true;
-          normalized.push(event);
-
-          if (event.type) this.addTypeOption(event.type);
-          if (event.type === 'input.prompt') this.inputCount += 1;
-          if (event.tone === 'err') this.errorCount += 1;
+          const id = rawEvent?.id;
+          if (id) {
+            if (this.eventIds[id]) continue;
+            this.eventIds[id] = true;
+          }
+          uniqueEvents.push(rawEvent);
         }
 
-        if (!normalized.length) return 0;
+        if (!uniqueEvents.length) return 0;
 
         if (position === 'prepend') {
           const container = this.$refs.eventsContainer;
           const previousHeight = container?.scrollHeight ?? 0;
           const previousTop = container?.scrollTop ?? 0;
 
-          this.events.unshift(...normalized);
+          this.events.unshift(...uniqueEvents);
 
           setTimeout(() => {
             if (!container) return;
             container.scrollTop = previousTop + (container.scrollHeight - previousHeight);
           }, 0);
         } else {
-          this.events.push(...normalized);
+          this.events.push(...uniqueEvents);
         }
 
-        return normalized.length;
-      },
-      normalizeEvent(message) {
-        const payload = this.getEventPayload(message);
-        const type = payload?.type || message?.type || 'event';
-        const tone = this.classifyEvent(message);
-        const summary = this.extractSummary(message);
-        const timeLabel = this.formatTimestamp(payload?.timestamp || message?.timestamp);
-        const id = payload?.id || message?.id || this.generateLocalId();
-        const threadLabel = message?.threadId || message?.thread_id || payload?.threadId || payload?.thread_id || '--';
-        const item = payload?.item || null;
-        const itemLabel = payload?.item?.type
-          ? `${payload.item.type}${payload.item.status ? ` (${payload.item.status})` : ''}`
-          : '';
-        const searchText = JSON.stringify(payload || message).toLowerCase();
-
-        return {
-          id,
-          type,
-          tone,
-          summary,
-          timeLabel,
-          threadLabel,
-          payload,
-          raw: message,
-          item,
-          itemLabel,
-          searchText,
-        };
-      },
-      addTypeOption(type) {
-        if (this.typeOptions.includes(type)) return;
-        this.typeOptions = [...this.typeOptions, type].sort();
-      },
-      getEventPayload(message) {
-        if (message && message.type === 'thread.event' && message.event) {
-          return message.event;
-        }
-        return message;
-      },
-      classifyEvent(message) {
-        const payload = this.getEventPayload(message);
-        const type = payload?.type || message?.type || 'event';
-        const itemStatus = payload?.item?.status;
-        if (itemStatus === 'failed') return 'err';
-        if (type.includes('error') || type.includes('failed') || type.includes('invalid')) return 'err';
-        if (type.includes('warn') || type.includes('abort')) return 'warn';
-        if (itemStatus === 'completed' || type.includes('completed') || type.includes('started')) return 'ok';
-        return 'info';
-      },
-      extractSummary(message) {
-        const payload = this.getEventPayload(message);
-        if (payload?.type === 'input.prompt' || payload?.type === 'input.prompt.queued') {
-          const prompt = typeof payload.prompt === 'string' ? payload.prompt : JSON.stringify(payload.prompt);
-          return `Prompt: ${prompt}`;
-        }
-        if (payload?.type === 'input.abort') {
-          return `Abort requested by ${payload.from || 'unknown'}`;
-        }
-        if (payload?.type === 'turn.abort') {
-          return 'Turn aborted';
-        }
-        if (payload?.type === 'turn.error') {
-          const name = payload.error?.name || 'Error';
-          const messageText = payload.error?.message || 'Unknown error';
-          return `${name}: ${messageText}`;
-        }
-        if (payload?.type === 'thread.started') {
-          return `Thread started: ${payload.thread_id || payload.threadId || 'unknown'}`;
-        }
-        if (payload?.type === 'turn.started') {
-          return 'Turn started';
-        }
-        if (payload?.type === 'turn.completed' && payload?.usage) {
-          const usage = payload.usage;
-          return `Turn completed (in ${usage.input_tokens}, out ${usage.output_tokens})`;
-        }
-        if (payload?.item?.text) return payload.item.text;
-        if (payload?.item?.type === 'command_execution') {
-          const status = payload.item.status || 'unknown';
-          return `${status}: ${payload.item.command}`;
-        }
-        if (payload?.item?.type) {
-          const status = payload.item.status ? ` (${payload.item.status})` : '';
-          return `${payload.item.type}${status}`;
-        }
-        if (payload?.message) return payload.message;
-        if (payload?.input) return payload.input;
-        if (typeof payload?.type === 'string') return payload.type;
-        if (typeof message?.type === 'string') return message.type;
-        return 'Event received';
-      },
-      formatTimestamp(value) {
-        if (!value) return '--';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return String(value);
-        return date.toLocaleTimeString();
-      },
-      generateLocalId() {
-        return Math.random().toString(36).slice(2, 8);
+        return uniqueEvents.length;
       },
     });
   }

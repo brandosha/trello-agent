@@ -78,21 +78,6 @@ header {
   color: var(--muted);
 }
 
-.filters {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.filters input, .filters select {
-  background: #0c1016;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 8px;
-}
-
 .input {
   width: 100%;
   background: #0c1016;
