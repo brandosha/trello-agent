@@ -48,3 +48,16 @@ export function upsertTrelloUser(member: TrelloMember): UserIdentity {
 
   return user;
 }
+
+export function listUsers(): UserIdentity[] {
+  return db.select({
+    username: usersTable.username,
+    fullName: usersTable.fullName,
+  })
+    .from(usersTable)
+    .all()
+    .map(({ username, fullName }) => ({
+      username,
+      fullName: fullName ?? undefined,
+    }));
+}

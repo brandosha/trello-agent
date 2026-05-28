@@ -20,7 +20,7 @@ import { getPublicKey } from "./ssh.js";
 import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
-import { upsertTrelloUser, UserIdentity } from "./users.js";
+import { listUsers, upsertTrelloUser, UserIdentity } from "./users.js";
 
 const INITIAL_THREAD_EVENT_LIMIT = 50;
 const MAX_THREAD_EVENT_LIMIT = 200;
@@ -412,6 +412,7 @@ const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message
   await client.checkPermissions(['admin.permissions']);
   
   const allPermissions = await permissions.all();
+  const users = listUsers();
   const jsonPermissions: Record<string, UserPermission[] | undefined> = {};
   Object.entries(allPermissions).forEach(([username, perms]) => {
     perms?.subscribe(p => client.send({
@@ -425,6 +426,7 @@ const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message
   // TODO: Remove this and update client side to handle 
   client.send({
     type: "admin.permissions.list",
+    users,
     permissions: jsonPermissions
   });
 });

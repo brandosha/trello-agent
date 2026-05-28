@@ -3,23 +3,22 @@
     <div class="panel-header">User permissions</div>
     <div class="panel-body stack">
       <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
-      <div>
-        <div class="label">Trello username</div>
-        <input v-model="permissionUsername" type="text" class="input" placeholder="username" />
-      </div>
-      <div>
-        <div class="label">Permissions (comma-separated)</div>
-        <input v-model="permissionList" type="text" class="input" placeholder="thread.subscribe, thread.prompt, admin.codex" />
-        <div class="badge">Use * for full access.</div>
-      </div>
-      <button class="btn primary" @click="savePermissions">Save permissions</button>
-      <div class="panel">
-        <div class="panel-header">Current permissions</div>
-        <div class="panel-body">
-          <div v-if="permissionEntries.length === 0" class="badge">No users yet.</div>
-          <div v-for="entry in permissionEntries" :key="entry.id" class="badge">
-            {{ entry.id }}: {{ entry.listLabel }}
+      <div class="badge">Use * for full access.</div>
+      <div v-if="userEntries.length === 0" class="badge">No users yet.</div>
+      <div v-else class="permission-grid">
+        <div v-for="entry in userEntries" :key="entry.username" class="permission-row">
+          <div class="permission-user">
+            <div class="label">{{ entry.fullName || entry.username }}</div>
+            <div v-if="entry.fullName" class="badge">{{ entry.username }}</div>
           </div>
+          <input
+            v-model="permissionInputs[entry.username]"
+            type="text"
+            class="input"
+            placeholder="thread.subscribe, thread.prompt, admin.codex"
+          />
+          <button class="btn primary" @click="savePermissions(entry.username)">Save</button>
+          <button class="btn" @click="clearPermissions(entry.username)">Clear</button>
         </div>
       </div>
     </div>
@@ -30,10 +29,9 @@
     return PetiteVue.reactive({
       $template: '#permissions-manager-template',
       backend: null,
-      permissionUsername: '',
-      permissionList: '',
       errorMessage: '',
-      permissionEntries: [],
+      users: [],
+      permissionInputs: {},
       permissionsByUsername: {},
       mounted() {
         this.backend = app.backend;
@@ -47,18 +45,25 @@
           this.refreshPermissions();
         });
 
-        this.backend.listen('admin.permissions.list', ({ permissions }) => {
+        this.backend.listen('admin.permissions.list', ({ users, permissions }) => {
+          this.users = Array.isArray(users) ? users : [];
           this.permissionsByUsername = permissions || {};
-          this.syncPermissionEntries();
+          this.syncPermissionInputs();
         });
 
         this.backend.listen('permissions.value', ({ username, permissions }) => {
           this.permissionsByUsername[username] = permissions;
-          this.syncPermissionEntries();
+          this.setPermissionInput(username, permissions);
         });
 
-        this.syncPermissionEntries();
+        this.syncPermissionInputs();
         this.refreshPermissions();
+      },
+      get userEntries() {
+        return this.users.map((user) => ({
+          username: user.username,
+          fullName: user.fullName,
+        }));
       },
       isAdmin() {
         return this.backend?.auth?.hasPermission
@@ -69,30 +74,38 @@
         if (!this.backend || !this.isAdmin()) return;
         this.backend.send('admin.permissions.list');
       },
-      syncPermissionEntries() {
-        const permissions = this.permissionsByUsername;
-        this.permissionEntries = Object.entries(permissions).map(([id, perms]) => {
-          const list = Array.isArray(perms) ? perms : [];
-          return {
-            id,
-            list,
-            listLabel: list.length ? list.join(', ') : 'none',
-          };
+      setPermissionInput(username, permissions) {
+        const list = Array.isArray(permissions) ? permissions : [];
+        this.permissionInputs[username] = list.join(', ');
+      },
+      syncPermissionInputs() {
+        this.users.forEach((user) => {
+          if (!user?.username) return;
+          this.setPermissionInput(user.username, this.permissionsByUsername[user.username]);
         });
       },
-      savePermissions() {
+      savePermissions(username) {
         this.errorMessage = '';
-        if (!this.permissionUsername) {
+        if (!username) {
           this.errorMessage = 'Username is required.';
           return;
         }
-        const permissions = this.permissionList
+        const permissions = (this.permissionInputs[username] || '')
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean);
         this.backend.send('admin.permissions.set', {
-          username: this.permissionUsername,
+          username,
           permissions,
+        });
+      },
+      clearPermissions(username) {
+        this.errorMessage = '';
+        if (!username) return;
+        this.permissionInputs[username] = '';
+        this.backend.send('admin.permissions.set', {
+          username,
+          permissions: [],
         });
       },
     });
