@@ -38,12 +38,12 @@
         this.backend = app.backend;
         if (!this.backend) return;
 
-        this.backend.listen('trello.boards.list', ({ boards }) => {
+        this.backend.listen('admin.trello.boards.list', ({ boards }) => {
           this.boards = Array.isArray(boards) ? boards : [];
           this.loadingBoards = false;
         });
 
-        this.backend.listen('trello.webhooks.list', ({ webhooks }) => {
+        this.backend.listen('admin.trello.webhooks.list', ({ webhooks }) => {
           this.webhooksByBoard = this.groupWebhooks(webhooks || []);
           this.loadingWebhooks = false;
         });
@@ -62,8 +62,8 @@
         if (!this.backend) return;
         this.loadingBoards = true;
         this.loadingWebhooks = true;
-        this.backend.send('trello.boards.list');
-        this.backend.send('trello.webhooks.list');
+        this.backend.send('admin.trello.boards.list');
+        this.backend.send('admin.trello.webhooks.list');
       },
       groupWebhooks(webhooks) {
         const byBoard = {};
@@ -84,7 +84,7 @@
         if (!this.backend) return;
         const enabled = !this.isWebhookEnabled(boardId);
         this.loadingWebhooks = true;
-        this.backend.send('trello.webhooks.set', { boardId, enabled });
+        this.backend.send('admin.trello.webhooks.set', { boardId, enabled });
       },
     });
   }

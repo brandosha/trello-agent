@@ -27,7 +27,7 @@
         this.backend = app.backend;
         if (!this.backend) return;
 
-        this.backend.listen('ssh.public_key', ({ publicKey }) => {
+        this.backend.listen('admin.ssh.public_key', ({ publicKey }) => {
           this.publicKey = publicKey || '';
           this.loading = false;
         });
@@ -43,7 +43,7 @@
         if (!this.backend) return;
         this.loading = true;
         this.errorMessage = '';
-        this.backend.send('ssh.public_key');
+        this.backend.send('admin.ssh.public_key');
       },
       async copyKey() {
         if (!this.publicKey) return;

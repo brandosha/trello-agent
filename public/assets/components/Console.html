@@ -47,7 +47,7 @@
           </div>
           <div>
             <div class="label">Permissions (comma-separated)</div>
-            <input v-model="permissionList" type="text" class="input" placeholder="thread.view, thread.prompt, thread.abort" />
+            <input v-model="permissionList" type="text" class="input" placeholder="thread.subscribe, thread.prompt, admin.codex" />
             <div class="badge">Use * for full access.</div>
           </div>
           <button class="btn primary" @click="savePermissions">Save permissions</button>
@@ -118,14 +118,14 @@
         this.backend.listen('auth.permissions', () => {
           this.syncAuthState();
           if (this.isAdmin) {
-            this.backend.send('permissions.list');
+            this.backend.send('admin.permissions.list');
           }
         });
 
         this.backend.listen('permissions.updated', () => {
           this.syncAuthState();
           if (this.isAdmin) {
-            this.backend.send('permissions.list');
+            this.backend.send('admin.permissions.list');
           }
         });
 
@@ -133,7 +133,7 @@
           this.syncAuthState();
         });
 
-        this.backend.listen('permissions.list', ({ permissions }) => {
+        this.backend.listen('admin.permissions.list', ({ permissions }) => {
           this.permissionsByUsername = permissions || {};
           this.syncPermissionEntries();
         });
@@ -148,7 +148,7 @@
         this.syncPermissionEntries();
 
         if (this.isAdmin) {
-          this.backend.send('permissions.list');
+          this.backend.send('admin.permissions.list');
         }
       },
       syncAuthState() {
@@ -212,7 +212,7 @@
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean);
-        this.backend.send('permissions.set', {
+        this.backend.send('admin.permissions.set', {
           username: this.permissionUsername,
           permissions,
         });

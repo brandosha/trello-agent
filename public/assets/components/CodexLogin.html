@@ -60,7 +60,7 @@
         if (!this.backend || this.running) return;
         this.outputHtml = '';
         this.statusLabel = 'Starting...';
-        this.backend.send('codex.login');
+        this.backend.send('admin.codex.login');
       },
       stopLogin() {
         if (!this.backend || !this.running) return;
