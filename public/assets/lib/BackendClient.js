@@ -4,7 +4,6 @@ class BackendClient {
 
     this.auth = {
       username: null,
-      email: null,
       fullName: null,
       permissions: [],
       _token: window.localStorage.getItem('trelloAgentAuthToken') || undefined,
@@ -49,9 +48,8 @@ class BackendClient {
       window.localStorage.setItem('trelloAgentAuthToken', authToken);
     });
 
-    this.listen('auth.success', ({ username, email, fullName }) => {
+    this.listen('auth.success', ({ username, fullName }) => {
       this.auth.username = username;
-      this.auth.email = email;
       this.auth.fullName = fullName;
 
       // If there are any active thread listeners, re-subscribe to ensure we continue receiving updates after a reconnect or auth change

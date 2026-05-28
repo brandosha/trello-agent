@@ -60,7 +60,6 @@ class WsClient {
     this.send({
       type: 'auth.success',
       username: user.username,
-      email: user.email,
       fullName: user.fullName,
     })
 
@@ -157,7 +156,7 @@ const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (message, client
     webhookOrigin: client.origin,
   });
 
-  const user = await upsertTrelloUser(await getTrelloMember(token));
+  const user = upsertTrelloUser(await getTrelloMember(token));
 
   client.setUser(user);
   client.send({ type: "trello.setup.success" });
@@ -183,7 +182,7 @@ const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (message, client) 
     throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
   }
 
-  const user = await upsertTrelloUser(await getTrelloMember(token));
+  const user = upsertTrelloUser(await getTrelloMember(token));
   client.setUser(user);
 
   const authToken = await generateAuthToken({ username: user.username });

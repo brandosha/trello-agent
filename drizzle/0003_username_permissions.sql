@@ -1,15 +1,13 @@
 CREATE TABLE `users` (
 	`username` text PRIMARY KEY NOT NULL,
-	`email` text,
 	`full_name` text,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL
 );
 --> statement-breakpoint
-INSERT INTO `users` (`username`, `email`, `created_at`, `updated_at`)
+INSERT INTO `users` (`username`, `created_at`, `updated_at`)
 SELECT
 	`user_id`,
-	CASE WHEN instr(`user_id`, '@') > 0 THEN `user_id` ELSE NULL END,
 	unixepoch(),
 	unixepoch()
 FROM `permissions`;
