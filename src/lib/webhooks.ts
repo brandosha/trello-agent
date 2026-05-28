@@ -4,6 +4,8 @@ import { permissions } from "./permissions.js";
 import { TrelloWebhookRequest, getThreadUrl, makeTrelloApiRequest } from "./trello.js";
 import { multilineString } from "./utils.js";
 
+const cardsWithThreadAttachmentCache = new Set<string>();
+
 export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   console.log(`Trello webhook received:\n${JSON.stringify({
     headers: request.headers,
@@ -61,22 +63,29 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
     return;
   }
 
-  const threadUrl = await getThreadUrl(threadId);
-  const attachments = await makeTrelloApiRequest({
-    method: 'GET',
-    endpoint: `cards/${cardId}/attachments?fields=url,name`,
-  });
-  const hasThreadAttachment = attachments.some((attachment: any) => attachment.url === threadUrl);
-  if (!hasThreadAttachment) {
-    await makeTrelloApiRequest({
-      method: 'POST',
-      endpoint: `cards/${cardId}/attachments`,
-      body: {
-        name: `Agent Thread`,
-        url: threadUrl
-      },
-      clientIdentifier: `TrelloAgent/webhook`
+  if (!cardsWithThreadAttachmentCache.has(cardId)) {
+    cardsWithThreadAttachmentCache.add(cardId);
+    setTimeout(() => {
+      cardsWithThreadAttachmentCache.delete(cardId)
+    }, 5 * 60 * 1000); // Cache for 5 minutes
+    
+    const threadUrl = await getThreadUrl(threadId);
+    const attachments = await makeTrelloApiRequest({
+      method: 'GET',
+      endpoint: `cards/${cardId}/attachments?fields=url,name`,
     });
+    const hasThreadAttachment = attachments.some((attachment: any) => attachment.url === threadUrl);
+    if (!hasThreadAttachment) {
+      await makeTrelloApiRequest({
+        method: 'POST',
+        endpoint: `cards/${cardId}/attachments`,
+        body: {
+          name: `Agent Thread`,
+          url: threadUrl
+        },
+        clientIdentifier: `TrelloAgent/webhook`
+      });
+    }
   }
   
   const cardName = request.body.action.data.card.name;
