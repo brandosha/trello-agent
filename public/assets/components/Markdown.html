@@ -1,0 +1,22 @@
+<template id="markdown-template">
+  <div class="markdown-body" v-html="renderedMarkdown"></div>
+</template>
+<script>
+  const md = markdownit();
+  
+  function Markdown(content) {
+    return {
+      $template: '#markdown-template',
+      content,
+      get renderedMarkdown() {
+        if (!this.content) return '';
+        try {
+          return md.render(this.content);
+        } catch (error) {
+          console.warn('Failed to render markdown:', error);
+          return this.content;
+        }
+      },
+    };
+  }
+</script>

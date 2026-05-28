@@ -32,7 +32,7 @@ function timeLabel(timestamp) {
   return date.toLocaleString();
 }
 
-var ansi = new AnsiUp();
+const ansi = new AnsiUp();
 
 
 async function importComponent(path) {
@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'CodexLogin',
     'ServerKey',
     'TrelloBoards',
+    'Markdown',
     'thread-events/DefaultThreadEvent',
     'thread-events/AgentMessageEvent',
     'thread-events/CommandExecutionEvent',
