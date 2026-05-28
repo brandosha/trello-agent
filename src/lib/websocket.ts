@@ -388,6 +388,11 @@ const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, 
 
   try {
     await permissions.forUser(message.username).set(newPermissions);
+    client.send({
+      type: "permissions.value",
+      username: message.username,
+      permissions: newPermissions,
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new WsError("INVALID_PERMISSIONS", "Invalid permissions format.");
