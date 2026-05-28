@@ -1,0 +1,74 @@
+<template id="command-execution-event-template">
+  <div class="event command-event" :class="statusClass">
+    <div class="meta">
+      <div>{{ timeLabel(event.timestamp) }}</div>
+      <div class="type">Command {{ statusLabel }}</div>
+    </div>
+    <div class="command-event-body">
+      <div class="command-line">{{ commandText }}</div>
+      <button
+        v-if="hasOutput"
+        type="button"
+        class="btn output-toggle"
+        @click="toggleOutput"
+      >
+        {{ outputToggleLabel }}
+      </button>
+      <div v-if="showOutput && hasOutput" class="command-output" v-html="outputHtml"></div>
+    </div>
+  </div>
+</template>
+<script>
+  function CommandExecutionEvent(event) {
+    return {
+      $template: '#command-execution-event-template',
+      event,
+      showOutput: false,
+      get item() {
+        return this.event?.item || {};
+      },
+      get statusLabel() {
+        return this.item?.status || 'unknown';
+      },
+      get statusClass() {
+        const status = this.item?.status;
+        if (status === 'completed') return 'ok';
+        if (status === 'failed') return 'err';
+        if (status === 'in_progress') return 'info';
+        return '';
+      },
+      get commandText() {
+        return this.item?.command || '(no command)';
+      },
+      get hasOutput() {
+        return typeof this.item?.aggregated_output === 'string'
+          ? this.item.aggregated_output.length > 0
+          : !!this.item?.aggregated_output;
+      },
+      get outputToggleLabel() {
+        return this.showOutput ? 'Hide output' : 'Show output';
+      },
+      get outputHtml() {
+        const output = this.item?.aggregated_output || '';
+        if (!output) return '';
+        try {
+          return ansi.ansi_to_html(String(output));
+        } catch (error) {
+          console.warn('Failed to render ANSI output:', error);
+        }
+        return this.escapeHtml(String(output));
+      },
+      toggleOutput() {
+        this.showOutput = !this.showOutput;
+      },
+      escapeHtml(value) {
+        return value
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      },
+    };
+  }
+</script>

@@ -1,0 +1,38 @@
+<template id="thread-event-template">
+  <div v-scope="component()"></div>
+</template>
+<script>
+  function ThreadEvent(event) {
+    return {
+      $template: '#thread-event-template',
+      event,
+      component() {
+        if (this.isPromptEvent()) {
+          return PromptEvent(this.event);
+        }
+        if (this.isAgentMessageEvent()) {
+          return AgentMessageEvent(this.event);
+        }
+        if (this.isCommandExecutionEvent()) {
+          return CommandExecutionEvent(this.event);
+        }
+        if (this.isMcpToolCallEvent()) {
+          return McpToolCallEvent(this.event);
+        }
+        return DefaultThreadEvent(this.event);
+      },
+      isPromptEvent() {
+        return this.event?.type === 'input.prompt';
+      },
+      isAgentMessageEvent() {
+        return this.event?.item?.type === 'agent_message';
+      },
+      isCommandExecutionEvent() {
+        return this.event?.item?.type === 'command_execution';
+      },
+      isMcpToolCallEvent() {
+        return this.event?.item?.type === 'mcp_tool_call';
+      },
+    };
+  }
+</script>

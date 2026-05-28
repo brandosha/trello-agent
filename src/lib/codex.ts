@@ -75,7 +75,12 @@ interface TurnErrorEvent {
 }
 
 type SharedThreadEvent = (
-  ThreadEvent | PromptQueuedEvent | PromptEvent | AbortEvent | TurnAbortEvent | TurnErrorEvent
+  (ThreadEvent & { turnId: string }) |
+  PromptQueuedEvent |
+  PromptEvent |
+  AbortEvent |
+  TurnAbortEvent |
+  TurnErrorEvent
 ) & {
   id: string;
   timestamp: Date
@@ -226,6 +231,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
         for await (const event of events) {
           const sharedEvent: SharedThreadEvent = {
             ...event,
+            turnId,
             id: generateEventId(),
             timestamp: new Date(),
           };

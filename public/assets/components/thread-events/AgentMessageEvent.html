@@ -1,0 +1,19 @@
+<template id="agent-message-event-template">
+  <div class="event agent-message-event">
+    <div class="meta">
+      <div>{{ timeLabel(event.timestamp) }}</div>
+    </div>
+    <div>
+      <div class="agent-message-body">{{ item.text }}</div>
+    </div>
+  </div>
+</template>
+<script>
+  function AgentMessageEvent(event) {
+    return {
+      $template: '#agent-message-event-template',
+      event,
+      item: event.item,
+    };
+  }
+</script>

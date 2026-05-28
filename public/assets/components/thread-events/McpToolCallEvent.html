@@ -1,0 +1,98 @@
+<template id="mcp-tool-call-event-template">
+  <div class="event mcp-tool-event" :class="statusClass">
+    <div class="meta">
+      <div>{{ timeLabel(event.timestamp) }}</div>
+      <div class="type">MCP {{ statusLabel }}</div>
+    </div>
+    <div class="mcp-tool-event-body">
+      <div class="tool-line">{{ toolLabel }}</div>
+      <button
+        v-if="hasArguments"
+        type="button"
+        class="btn output-toggle"
+        @click="toggleArgs"
+      >
+        {{ argsToggleLabel }}
+      </button>
+      <div v-if="showArgs && hasArguments" class="command-output">
+        <pre>{{ argsText }}</pre>
+      </div>
+      <button
+        v-if="hasDetails"
+        type="button"
+        class="btn output-toggle"
+        @click="toggleDetails"
+      >
+        {{ detailsToggleLabel }}
+      </button>
+      <div v-if="showDetails && hasDetails" class="command-output">
+        <pre>{{ detailsText }}</pre>
+      </div>
+    </div>
+  </div>
+</template>
+<script>
+  function McpToolCallEvent(event) {
+    return {
+      $template: '#mcp-tool-call-event-template',
+      event,
+      showArgs: false,
+      showDetails: false,
+      get item() {
+        return this.event?.item || {};
+      },
+      get statusLabel() {
+        return this.item?.status || 'unknown';
+      },
+      get statusClass() {
+        const status = this.item?.status;
+        if (status === 'completed') return 'ok';
+        if (status === 'failed') return 'err';
+        if (status === 'in_progress') return 'info';
+        return '';
+      },
+      get toolLabel() {
+        const server = this.item?.server || 'unknown-server';
+        const tool = this.item?.tool || 'unknown-tool';
+        return `${server} :: ${tool}`;
+      },
+      get hasArguments() {
+        return this.item?.arguments && Object.keys(this.item.arguments).length > 0;
+      },
+      get argsToggleLabel() {
+        return this.showArgs ? 'Hide args' : 'Show args';
+      },
+      get argsText() {
+        if (!this.hasArguments) return '';
+        return this.stringifyValue(this.item.arguments, 2);
+      },
+      get hasDetails() {
+        return Boolean(this.item?.result || this.item?.error);
+      },
+      get detailsToggleLabel() {
+        return this.showDetails ? 'Hide result' : 'Show result';
+      },
+      get detailsText() {
+        const payload = {
+          result: this.item?.result ?? null,
+          error: this.item?.error ?? null,
+        };
+        return this.stringifyValue(payload, 2);
+      },
+      toggleDetails() {
+        this.showDetails = !this.showDetails;
+      },
+      toggleArgs() {
+        this.showArgs = !this.showArgs;
+      },
+      stringifyValue(value, indent = 0) {
+        try {
+          if (typeof value === 'string') return value;
+          return JSON.stringify(value, null, indent || 2);
+        } catch (error) {
+          return String(value);
+        }
+      },
+    };
+  }
+</script>

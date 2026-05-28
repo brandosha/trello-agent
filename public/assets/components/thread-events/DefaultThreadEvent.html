@@ -1,0 +1,26 @@
+<template id="default-thread-event-template">
+  <div v-if="!isHidden" class="event" class="info" @click="showRawJson = !showRawJson">
+    <div class="meta">
+      <div>{{ timeLabel(event.timestamp) }}</div>
+      <div>{{ event.type }}</div>
+    </div>
+    <div v-if="showRawJson" class="raw-json">
+      <pre>{{ rawJson }}</pre>
+    </div>
+  </div>
+</template>
+<script>
+  function DefaultThreadEvent(event) {
+    return {
+      $template: '#default-thread-event-template',
+      event,
+      rawJson: JSON.stringify(event, null, 2),
+      showRawJson: false,
+      get isHidden() {
+        return [
+          'input.prompt.queued',
+        ].includes(this.event?.type);
+      },
+    };
+  }
+</script>
