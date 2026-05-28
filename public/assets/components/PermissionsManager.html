@@ -1,0 +1,100 @@
+<template id="permissions-manager-template">
+  <section class="panel" @vue:mounted="mounted">
+    <div class="panel-header">User permissions</div>
+    <div class="panel-body stack">
+      <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+      <div>
+        <div class="label">Trello username</div>
+        <input v-model="permissionUsername" type="text" class="input" placeholder="username" />
+      </div>
+      <div>
+        <div class="label">Permissions (comma-separated)</div>
+        <input v-model="permissionList" type="text" class="input" placeholder="thread.subscribe, thread.prompt, admin.codex" />
+        <div class="badge">Use * for full access.</div>
+      </div>
+      <button class="btn primary" @click="savePermissions">Save permissions</button>
+      <div class="panel">
+        <div class="panel-header">Current permissions</div>
+        <div class="panel-body">
+          <div v-if="permissionEntries.length === 0" class="badge">No users yet.</div>
+          <div v-for="entry in permissionEntries" :key="entry.id" class="badge">
+            {{ entry.id }}: {{ entry.listLabel }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+<script>
+  function PermissionsManager() {
+    return PetiteVue.reactive({
+      $template: '#permissions-manager-template',
+      backend: null,
+      permissionUsername: '',
+      permissionList: '',
+      errorMessage: '',
+      permissionEntries: [],
+      permissionsByUsername: {},
+      mounted() {
+        this.backend = app.backend;
+        if (!this.backend) return;
+
+        this.backend.listen('auth.permissions', () => {
+          this.refreshPermissions();
+        });
+
+        this.backend.listen('permissions.updated', () => {
+          this.refreshPermissions();
+        });
+
+        this.backend.listen('admin.permissions.list', ({ permissions }) => {
+          this.permissionsByUsername = permissions || {};
+          this.syncPermissionEntries();
+        });
+
+        this.backend.listen('permissions.value', ({ username, permissions }) => {
+          this.permissionsByUsername[username] = permissions;
+          this.syncPermissionEntries();
+        });
+
+        this.syncPermissionEntries();
+        this.refreshPermissions();
+      },
+      isAdmin() {
+        return this.backend?.auth?.hasPermission
+          ? this.backend.auth.hasPermission('admin')
+          : false;
+      },
+      refreshPermissions() {
+        if (!this.backend || !this.isAdmin()) return;
+        this.backend.send('admin.permissions.list');
+      },
+      syncPermissionEntries() {
+        const permissions = this.permissionsByUsername;
+        this.permissionEntries = Object.entries(permissions).map(([id, perms]) => {
+          const list = Array.isArray(perms) ? perms : [];
+          return {
+            id,
+            list,
+            listLabel: list.length ? list.join(', ') : 'none',
+          };
+        });
+      },
+      savePermissions() {
+        this.errorMessage = '';
+        if (!this.permissionUsername) {
+          this.errorMessage = 'Username is required.';
+          return;
+        }
+        const permissions = this.permissionList
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+        this.backend.send('admin.permissions.set', {
+          username: this.permissionUsername,
+          permissions,
+        });
+      },
+    });
+  }
+</script>

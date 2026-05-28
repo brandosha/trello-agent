@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([
     'Router',
     'Console',
+    'PermissionsManager',
     'CodexLogin',
     'ServerKey',
     'TrelloBoards',
