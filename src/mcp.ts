@@ -187,9 +187,10 @@ server.registerTool("git_clone", {
   description: "Tool for cloning a git repository. Must clone from an ssh URL and the destination must be a relative path within the current working directory.",
   inputSchema: z.object({
     gitRepo: z.string(),
+    branch: z.string(),
     destination: z.string(),
   }),
-}, async (input, context) => {
+}, async (input) => {
   if (!input.gitRepo.startsWith("git@")) {
     return {
       isError: true,
@@ -216,7 +217,7 @@ server.registerTool("git_clone", {
     await addDetachedGitWorktree({
       location: destinationPath,
       repo: input.gitRepo,
-      branch: 'main'
+      branch: input.branch
     });
   } catch (error) {
     return {
@@ -277,7 +278,7 @@ server.registerTool("set_workspace_setup_instructions", {
     key: z.string(),
     text: z.string(),
   })
-}, async (input, context) => {
+}, async (input) => {
 
   const { key, text } = input;
   if (key.startsWith("__") || key.endsWith("__")) {
