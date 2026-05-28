@@ -131,7 +131,7 @@ export class UserPermissions extends ValueSub<UserPermissionList> {
     this._username = username;
   }
 
-  setValue(permissions: UserPermissionList) {
+  private setValue(permissions: UserPermissionList) {
     super.set(permissions);
   }
 
@@ -153,7 +153,7 @@ class Permissions {
     permissionsIndex.then(perms => {
       Object.entries(perms).forEach(([username, p]) => {
         const userPermissions = this.forUser(username);
-        userPermissions.setValue(p ?? []);
+        userPermissions.set(p ?? []);
       })
     })
   }
@@ -196,8 +196,8 @@ class Permissions {
     setPermissionValues(toUsername, mergedPermissions);
     deletePermissionValues(fromUsername);
 
-    this.forUser(toUsername).setValue(mergedPermissions);
-    this._users[fromUsername]?.setValue([]);
+    this.forUser(toUsername).set(mergedPermissions);
+    this._users[fromUsername]?.set([]);
     delete this._users[fromUsername];
   }
 }

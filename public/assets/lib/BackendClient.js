@@ -75,7 +75,6 @@ class BackendClient {
       url.searchParams.set('key', key);
       url.searchParams.set('return_url', returnUrl);
 
-      debugger;
       location.assign(url.toString());
     });
 
