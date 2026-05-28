@@ -2,7 +2,7 @@
   <div class="event command-event" :class="statusClass">
     <div class="meta">
       <div>{{ timeLabel(event.timestamp) }}</div>
-      <div class="type">{{ statusLabel }}</div>
+      <div class="type">Command {{ statusLabel }}</div>
     </div>
     <div class="command-event-body">
       <div class="command-line">{{ commandText }}</div>
@@ -34,7 +34,7 @@
         const status = this.item?.status;
         if (status === 'completed') return 'ok';
         if (status === 'failed') return 'err';
-        if (status === 'in_progress') return 'warn';
+        if (status === 'in_progress') return 'info';
         return '';
       },
       get commandText() {

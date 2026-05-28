@@ -16,6 +16,9 @@
         if (this.isCommandExecutionEvent()) {
           return CommandExecutionEvent(this.event);
         }
+        if (this.isMcpToolCallEvent()) {
+          return McpToolCallEvent(this.event);
+        }
         return DefaultThreadEvent(this.event);
       },
       isPromptEvent() {
@@ -26,6 +29,9 @@
       },
       isCommandExecutionEvent() {
         return this.event?.item?.type === 'command_execution';
+      },
+      isMcpToolCallEvent() {
+        return this.event?.item?.type === 'mcp_tool_call';
       },
     };
   }

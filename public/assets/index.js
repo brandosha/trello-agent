@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'thread-events/DefaultThreadEvent',
     'thread-events/AgentMessageEvent',
     'thread-events/CommandExecutionEvent',
+    'thread-events/McpToolCallEvent',
     'thread-events/PromptEvent',
     'thread-events/ThreadEvent',
     'Thread',
