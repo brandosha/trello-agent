@@ -257,7 +257,8 @@ server.registerResource("workspace_setup_instructions",
 
     instructions.__SYSTEM_INSTRUCTIONS__ = [
       "Never assume. If you are unsure how to set up your workspace, ask. Then use the `set_workspace_setup_instructions` tool to write the instructions you receive for future reference. Unless otherwise specified, setup instructions are specific to the Trello board that the thread is associated with.",
-      "If you need to clone a repository, do not use `git clone` directly. Always use the `git_clone` tool. Once a repository is cloned, immediately read the instructions in AGENTS.md or similar documentation within the repository and follow them.",
+      "If you need to clone a repository, do not use `git clone` directly. Always use the `git_clone` tool. If the clone fails due to authentication issues, do not attempt to find a workaround, instead report the blocker immediately.",
+      "Once a repository is cloned, immediately read the instructions in TRELLO_AGENT.md, AGENTS.md and similar documentation within the repository and commit to follow them.",
     ].join("\n");
 
     return {
