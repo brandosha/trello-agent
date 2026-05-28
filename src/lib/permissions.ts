@@ -69,12 +69,6 @@ function setPermissionValues(username: string, permissions: readonly string[]) {
     .run();
 }
 
-function deletePermissionValues(username: string) {
-  db.delete(permissionsTable)
-    .where(eq(permissionsTable.username, username))
-    .run();
-}
-
 let permissionsIndex = Promise.resolve(
   permissionsIndexSchema.parse(listPermissionValues())
 );
@@ -131,10 +125,6 @@ export class UserPermissions extends ValueSub<UserPermissionList> {
     this._username = username;
   }
 
-  private setValue(permissions: UserPermissionList) {
-    super.set(permissions);
-  }
-
   async set(permissions: UserPermissionList) {
     await setPermissions(this._username, permissions);
     super.set(permissions);
@@ -169,36 +159,6 @@ class Permissions {
   async all() {
     await permissionsIndex;
     return this._users;
-  }
-
-  async migrateUserKey(fromUsername: string, toUsername: string) {
-    if (fromUsername === toUsername) {
-      return;
-    }
-
-    const index = await permissionsIndex;
-    const fromPermissions = index[fromUsername] ??
-      userPermissionListSchema.parse(getPermissionValues(fromUsername));
-
-    if (!fromPermissions.length) {
-      return;
-    }
-
-    const toPermissions = index[toUsername] ??
-      userPermissionListSchema.parse(getPermissionValues(toUsername));
-    const mergedPermissions = userPermissionListSchema.parse(Array.from(new Set([
-      ...toPermissions,
-      ...fromPermissions,
-    ])));
-
-    index[toUsername] = mergedPermissions;
-    delete index[fromUsername];
-    setPermissionValues(toUsername, mergedPermissions);
-    deletePermissionValues(fromUsername);
-
-    this.forUser(toUsername).set(mergedPermissions);
-    this._users[fromUsername]?.set([]);
-    delete this._users[fromUsername];
   }
 }
 

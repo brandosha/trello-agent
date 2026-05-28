@@ -92,7 +92,7 @@ export async function makeTrelloApiRequest(request: TrelloApiRequest) {
 export async function getTrelloMember(token: string) {
   return await makeTrelloApiRequest({
     method: 'GET',
-    endpoint: 'members/me?fields=id,username,fullName,email',
+    endpoint: 'members/me?fields=id,username,fullName',
     token
   });
 }

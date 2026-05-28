@@ -7,7 +7,6 @@ export const configTable = sqliteTable("config", {
 
 export const usersTable = sqliteTable("users", {
   username: text("username").primaryKey(),
-  email: text("email"),
   fullName: text("full_name"),
   createdAt: int("created_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
   updatedAt: int("updated_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
