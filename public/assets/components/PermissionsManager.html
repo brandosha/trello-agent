@@ -45,6 +45,11 @@
           this.refreshPermissions();
         });
 
+        this.backend.listen('error', (message) => {
+          if (!['INVALID_PERMISSIONS', 'FORBIDDEN'].includes(message?.code)) return;
+          this.errorMessage = message.message || 'Failed to update permissions.';
+        });
+
         this.backend.listen('admin.permissions.list', ({ users, permissions }) => {
           this.users = Array.isArray(users) ? users : [];
           this.permissionsByUsername = permissions || {};

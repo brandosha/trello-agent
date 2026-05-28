@@ -380,11 +380,20 @@ const permissionsSetSchema = z.object({
 const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, client) => {
   await client.checkPermissions(['admin.permissions']);
 
+  const validPermissions = new Set<string>(permissions.PERMISSION_TYPES);
   const newPermissions = Array.from(new Set(
     message.permissions
       .map((permission) => permission.trim())
       .filter(Boolean)
   )) as UserPermission[];
+  const invalidPermissions = newPermissions.filter((permission) => !validPermissions.has(permission));
+
+  if (invalidPermissions.length > 0) {
+    throw new WsError(
+      "INVALID_PERMISSIONS",
+      `Invalid permission type${invalidPermissions.length === 1 ? "" : "s"}: ${invalidPermissions.join(", ")}.`
+    );
+  }
 
   try {
     await permissions.forUser(message.username).set(newPermissions);
