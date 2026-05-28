@@ -122,7 +122,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   private _thread: Promise<Thread>;
   private _threadQueue: Promise<Thread>;
   private _abortController = new AbortController();
-  // private _pubsub = new PubSub<SharedThreadEvent>();
+  private _promptIntakeLock?: Promise<void>;
 
   constructor(id: string, options: ThreadOptions = {}) {
     super()
@@ -192,7 +192,20 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     return this.queueInput(prompt, from, options);
   }
 
-  queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
+  async queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
+    if (this._promptIntakeLock) {
+      await this._promptIntakeLock;
+    }
+
+    let resolveLock: () => void;
+    this._promptIntakeLock = new Promise((resolve) => {
+      resolveLock = () => {
+        resolve();
+        this._promptIntakeLock = undefined;
+      };
+    });
+    
+
     const turnId = generateEventId();
     const result: SharedThreadTurn = {
       turnId,
@@ -238,6 +251,10 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
           result.events.push(sharedEvent);
           this.publish(sharedEvent);
           this.recordEvent(sharedEvent);
+
+          if (event.type === "item.completed") {
+            resolveLock();
+          }
         }
       } catch (err: any) {
         if (err.name === "AbortError") {
@@ -267,6 +284,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
         }
       }
       
+      resolveLock(); // In case the turn completes without emitting an item.completed event, we want to make sure to release the lock so that the next prompt can be processed.
       return thread;
     });
     this._threadQueue = promise;
@@ -274,7 +292,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     return promise.then(() => result);
   }
 
-  abort(from: string) {
+  async abort(from: string): Promise<void> {
     const abortEvent: SharedThreadEvent = {
       type: "input.abort",
       id: generateEventId(),
@@ -283,7 +301,8 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     };
     this.publish(abortEvent);
     this.recordEvent(abortEvent);
-    
+
+    await this._promptIntakeLock;
     this._abortController.abort();
     this._abortController = new AbortController();
   }
