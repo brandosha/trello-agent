@@ -121,8 +121,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   private _threadDir: string;
   private _thread: Promise<Thread>;
   private _threadQueue: Promise<Thread>;
-  private _abortController = new AbortController();
-  private _promptIntakeLock?: Promise<void>;
+  private _abortLock = Promise.resolve(new AbortController());
 
   constructor(id: string, options: ThreadOptions = {}) {
     super()
@@ -192,20 +191,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     return this.queueInput(prompt, from, options);
   }
 
-  async queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
-    if (this._promptIntakeLock) {
-      await this._promptIntakeLock;
-    }
-
-    let resolveLock: () => void;
-    this._promptIntakeLock = new Promise((resolve) => {
-      resolveLock = () => {
-        resolve();
-        this._promptIntakeLock = undefined;
-      };
-    });
-    
-
+  queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
     const turnId = generateEventId();
     const result: SharedThreadTurn = {
       turnId,
@@ -238,7 +224,13 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
       this.publish(inputEvent);
       this.recordEvent(inputEvent);
 
-      options.signal = this._abortController.signal;
+      const abortController = new AbortController();
+      let resolveAbortLock: () => void = () => {};
+      this._abortLock = new Promise((resolve) => {
+        resolveAbortLock = () => resolve(abortController);
+      });
+
+      options.signal = abortController.signal;
       try {
         const { events } = await thread.runStreamed(withPromptAttribution(prompt, from), options);
         for await (const event of events) {
@@ -253,7 +245,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
           this.recordEvent(sharedEvent);
 
           if (event.type === "item.completed") {
-            resolveLock();
+            resolveAbortLock();
           }
         }
       } catch (err: any) {
@@ -284,7 +276,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
         }
       }
       
-      resolveLock(); // In case the turn completes without emitting an item.completed event, we want to make sure to release the lock so that the next prompt can be processed.
+      resolveAbortLock(); // In case the turn completes without emitting an item.completed event, we want to make sure to release the lock
       return thread;
     });
     this._threadQueue = promise;
@@ -302,9 +294,8 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     this.publish(abortEvent);
     this.recordEvent(abortEvent);
 
-    await this._promptIntakeLock;
-    this._abortController.abort();
-    this._abortController = new AbortController();
+    const abortController = await this._abortLock;
+    abortController.abort();
   }
 
   private ensureThreadRecord() {
