@@ -18,13 +18,14 @@ class BackendClient {
         }
       
         let parts = permission.split('.');
-        while (parts.length > 2) {
+        while (parts.length > 1) {
           parts.pop();
           const permToCheck = parts.join('.');
           if (permissions.includes(permToCheck)) {
             return true;
           }
         }
+        return false;
       }
     }
 

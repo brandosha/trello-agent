@@ -20,7 +20,7 @@ import { getPublicKey } from "./ssh.js";
 import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
-import { upsertTrelloUser, UserIdentity } from "./users.js";
+import { listUsers, upsertTrelloUser, UserIdentity } from "./users.js";
 
 const INITIAL_THREAD_EVENT_LIMIT = 50;
 const MAX_THREAD_EVENT_LIMIT = 200;
@@ -264,7 +264,7 @@ function getThreadEventPage(thread: SharedThread, limit: number, offset: number)
 const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, client) => {
   const { threadId } = message;
 
-  await client.checkPermissions(['thread.view']);
+  await client.checkPermissions(['thread.subscribe']);
 
   if (client.codexThreads.has(threadId)) {
     throw new WsError("ALREADY_SUBSCRIBED", `Already subscribed to thread ${threadId}.`);
@@ -278,8 +278,8 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, cli
 
   const thread = codex.thread(message.threadId);
 
-  const unsubscribe = thread.subscribe(event => {
-    if (!client.permissions?.has('thread.view')) {
+  const unsubscribe = thread.subscribe(async event => {
+    if (!await client.permissions?.has('thread.subscribe')) {
       const unsub = client.codexThreads.get(threadId);
       unsub?.();
       return;
@@ -315,7 +315,7 @@ const threadEventsListSchema = z.object({
 const threadEventsListEndpoint = wsEndpoint(threadEventsListSchema, async (message, client) => {
   const { threadId } = message;
 
-  await client.checkPermissions(['thread.view']);
+  await client.checkPermissions(['thread.subscribe']);
 
   const exists = await codex.threadExists(threadId);
   if (!exists) {
@@ -372,22 +372,36 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) =
 });
 
 const permissionsSetSchema = z.object({
-  type: z.literal("permissions.set"),
+  type: z.literal("admin.permissions.set"),
   username: z.string(),
   permissions: z.array(z.string()),
 });
 
 const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.permissions']);
 
+  const validPermissions = new Set<string>(permissions.PERMISSION_TYPES);
   const newPermissions = Array.from(new Set(
     message.permissions
       .map((permission) => permission.trim())
       .filter(Boolean)
   )) as UserPermission[];
+  const invalidPermissions = newPermissions.filter((permission) => !validPermissions.has(permission));
+
+  if (invalidPermissions.length > 0) {
+    throw new WsError(
+      "INVALID_PERMISSIONS",
+      `Invalid permission type${invalidPermissions.length === 1 ? "" : "s"}: ${invalidPermissions.join(", ")}.`
+    );
+  }
 
   try {
     await permissions.forUser(message.username).set(newPermissions);
+    client.send({
+      type: "permissions.value",
+      username: message.username,
+      permissions: newPermissions,
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new WsError("INVALID_PERMISSIONS", "Invalid permissions format.");
@@ -400,13 +414,14 @@ const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, 
 
 
 const permissionsListSchema = z.object({
-  type: z.literal("permissions.list"),
+  type: z.literal("admin.permissions.list"),
 });
 
 const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.permissions']);
   
   const allPermissions = await permissions.all();
+  const users = listUsers();
   const jsonPermissions: Record<string, UserPermission[] | undefined> = {};
   Object.entries(allPermissions).forEach(([username, perms]) => {
     perms?.subscribe(p => client.send({
@@ -419,22 +434,23 @@ const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message
   // const permissions = await listPermissions();
   // TODO: Remove this and update client side to handle 
   client.send({
-    type: "permissions.list",
+    type: "admin.permissions.list",
+    users,
     permissions: jsonPermissions
   });
 });
 
 const trelloBoardsListSchema = z.object({
-  type: z.literal("trello.boards.list"),
+  type: z.literal("admin.trello.boards.list"),
 });
 
 const trelloBoardsListEndpoint = wsEndpoint(trelloBoardsListSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.trello']);
 
   try {
     const boards = await listTrelloBoards();
     client.send({
-      type: "trello.boards.list",
+      type: "admin.trello.boards.list",
       boards,
     });
   } catch (err: any) {
@@ -443,16 +459,16 @@ const trelloBoardsListEndpoint = wsEndpoint(trelloBoardsListSchema, async (messa
 });
 
 const trelloWebhooksListSchema = z.object({
-  type: z.literal("trello.webhooks.list"),
+  type: z.literal("admin.trello.webhooks.list"),
 });
 
 const trelloWebhooksListEndpoint = wsEndpoint(trelloWebhooksListSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.trello']);
 
   try {
     const webhooks = await listTrelloWebhooks();
     client.send({
-      type: "trello.webhooks.list",
+      type: "admin.trello.webhooks.list",
       webhooks,
     });
   } catch (err: any) {
@@ -461,13 +477,13 @@ const trelloWebhooksListEndpoint = wsEndpoint(trelloWebhooksListSchema, async (m
 });
 
 const trelloWebhooksSetSchema = z.object({
-  type: z.literal("trello.webhooks.set"),
+  type: z.literal("admin.trello.webhooks.set"),
   boardId: z.string(),
   enabled: z.boolean(),
 });
 
 const trelloWebhooksSetEndpoint = wsEndpoint(trelloWebhooksSetSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.trello']);
 
   try {
     const { boardId, enabled } = message;
@@ -488,7 +504,7 @@ const trelloWebhooksSetEndpoint = wsEndpoint(trelloWebhooksSetSchema, async (mes
 
     const refreshed = await listTrelloWebhooks();
     client.send({
-      type: "trello.webhooks.list",
+      type: "admin.trello.webhooks.list",
       webhooks: refreshed,
     });
   } catch (err: any) {
@@ -497,16 +513,16 @@ const trelloWebhooksSetEndpoint = wsEndpoint(trelloWebhooksSetSchema, async (mes
 });
 
 const sshPublicKeySchema = z.object({
-  type: z.literal("ssh.public_key"),
+  type: z.literal("admin.ssh.public_key"),
 });
 
 const sshPublicKeyEndpoint = wsEndpoint(sshPublicKeySchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.ssh']);
 
   try {
     const publicKey = await getPublicKey();
     client.send({
-      type: "ssh.public_key",
+      type: "admin.ssh.public_key",
       publicKey,
     });
   } catch (err: any) {
@@ -516,11 +532,11 @@ const sshPublicKeyEndpoint = wsEndpoint(sshPublicKeySchema, async (message, clie
 
 
 const codexLoginSchema = z.object({
-  type: z.literal("codex.login"),
+  type: z.literal("admin.codex.login"),
 });
 
 const codexLoginEndpoint = wsEndpoint(codexLoginSchema, async (message, client) => {
-  await client.checkPermissions(['admin']);
+  await client.checkPermissions(['admin.codex']);
 
   const login = codex.login();
   login.output.subscribe(output => {
@@ -551,18 +567,18 @@ const endpoints: Record<string, WsMessageHandler> = {
   "auth": authEndpoint,
   "trello.setup": trelloSetupEndpoint,
   "trello.auth": trelloAuthEndpoint,
-  "trello.boards.list": trelloBoardsListEndpoint,
-  "trello.webhooks.list": trelloWebhooksListEndpoint,
-  "trello.webhooks.set": trelloWebhooksSetEndpoint,
-  "ssh.public_key": sshPublicKeyEndpoint,
+  "admin.trello.boards.list": trelloBoardsListEndpoint,
+  "admin.trello.webhooks.list": trelloWebhooksListEndpoint,
+  "admin.trello.webhooks.set": trelloWebhooksSetEndpoint,
+  "admin.ssh.public_key": sshPublicKeyEndpoint,
   "thread.create": threadCreateEndpoint,
   "thread.subscribe": subscribeEndpoint,
   "thread.events.list": threadEventsListEndpoint,
   "thread.prompt": promptEndpoint,
   "thread.abort": abortEndpoint,
-  "permissions.set": permissionsSetEndpoint,
-  "permissions.list": permissionsListEndpoint,
-  "codex.login": codexLoginEndpoint,
+  "admin.permissions.set": permissionsSetEndpoint,
+  "admin.permissions.list": permissionsListEndpoint,
+  "admin.codex.login": codexLoginEndpoint,
 };
 
 

@@ -93,7 +93,7 @@
       syncAuthState() {
         const auth = this.backend?.auth;
         this.authorized = !!auth?.username;
-        this.canView = auth?.hasPermission ? auth.hasPermission('thread.view') : false;
+        this.canView = auth?.hasPermission ? auth.hasPermission('thread.subscribe') : false;
         this.canPrompt = auth?.hasPermission ? auth.hasPermission('thread.prompt') : false;
         this.canAbort = auth?.hasPermission ? auth.hasPermission('thread.abort') : false;
       },

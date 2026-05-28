@@ -215,6 +215,33 @@ pre {
   padding: 8px 10px;
 }
 
+.permission-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.permission-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.permission-user {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .permission-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
 .prompt-composer {
   min-height: 36px;
   max-height: 180px;

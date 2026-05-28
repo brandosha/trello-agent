@@ -38,30 +38,7 @@
           </div>
         </div>
       </section>
-      <section v-if="isAdmin" class="panel">
-        <div class="panel-header">User permissions</div>
-        <div class="panel-body stack">
-          <div>
-            <div class="label">Trello username</div>
-            <input v-model="permissionUsername" type="text" class="input" placeholder="username" />
-          </div>
-          <div>
-            <div class="label">Permissions (comma-separated)</div>
-            <input v-model="permissionList" type="text" class="input" placeholder="thread.view, thread.prompt, thread.abort" />
-            <div class="badge">Use * for full access.</div>
-          </div>
-          <button class="btn primary" @click="savePermissions">Save permissions</button>
-          <div class="panel">
-            <div class="panel-header">Current permissions</div>
-            <div class="panel-body">
-              <div v-if="permissionEntries.length === 0" class="badge">No users yet.</div>
-              <div v-for="entry in permissionEntries" :key="entry.id" class="badge">
-                {{ entry.id }}: {{ entry.listLabel }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <div v-if="isAdmin" v-scope="PermissionsManager()"></div>
       <div v-if="isAdmin" v-scope="ServerKey()"></div>
       <div v-if="isAdmin" v-scope="TrelloBoards()"></div>
       <div v-if="isAdmin" v-scope="CodexLogin()"></div>
@@ -77,14 +54,10 @@
       apiSecretInput: '',
       statusMessage: '',
       errorMessage: '',
-      permissionUsername: '',
-      permissionList: '',
       configured: false,
       authorized: false,
       isAdmin: false,
       username: null,
-      permissionEntries: [],
-      permissionsByUsername: {},
       mounted() {
         this.backend = app.backend;
         if (!this.backend) return;
@@ -117,39 +90,14 @@
 
         this.backend.listen('auth.permissions', () => {
           this.syncAuthState();
-          if (this.isAdmin) {
-            this.backend.send('permissions.list');
-          }
-        });
-
-        this.backend.listen('permissions.updated', () => {
-          this.syncAuthState();
-          if (this.isAdmin) {
-            this.backend.send('permissions.list');
-          }
         });
 
         this.backend.listen('auth.success', () => {
           this.syncAuthState();
         });
-
-        this.backend.listen('permissions.list', ({ permissions }) => {
-          this.permissionsByUsername = permissions || {};
-          this.syncPermissionEntries();
-        });
-
-        this.backend.listen('permissions.value', ({ username, permissions }) => {
-          this.permissionsByUsername[username] = permissions;
-          this.syncPermissionEntries();
-        });
         this.loadDraftApiKey();
 
         this.syncAuthState();
-        this.syncPermissionEntries();
-
-        if (this.isAdmin) {
-          this.backend.send('permissions.list');
-        }
       },
       syncAuthState() {
         this.configured = !!this.backend?.configured;
@@ -158,17 +106,6 @@
           ? this.backend.auth.hasPermission('admin')
           : false;
         this.username = this.backend?.auth?.username || null;
-      },
-      syncPermissionEntries() {
-        const permissions = this.permissionsByUsername;
-        this.permissionEntries = Object.entries(permissions).map(([id, perms]) => {
-          const list = Array.isArray(perms) ? perms : [];
-          return {
-            id,
-            list,
-            listLabel: list.length ? list.join(', ') : 'none',
-          };
-        });
       },
       loadDraftApiKey() {
         const storedKey = window.localStorage.getItem('trelloAgentApiKeyDraft');
@@ -201,21 +138,6 @@
       startAuth() {
         if (!this.backend) return;
         this.backend.send('auth');
-      },
-      savePermissions() {
-        this.errorMessage = '';
-        if (!this.permissionUsername) {
-          this.errorMessage = 'Username is required.';
-          return;
-        }
-        const permissions = this.permissionList
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean);
-        this.backend.send('permissions.set', {
-          username: this.permissionUsername,
-          permissions,
-        });
       },
     });
   }

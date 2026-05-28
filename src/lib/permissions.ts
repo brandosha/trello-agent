@@ -6,11 +6,15 @@ import { ValueSub } from "./PubSub.js";
 
 const PERMISSION_TYPES = [
   'admin',
+  'admin.permissions',
+  'admin.trello',
+  'admin.ssh',
+  'admin.codex',
   'thread',
   'thread.create',
+  'thread.subscribe',
   'thread.prompt',
   'thread.abort',
-  'thread.view',
   '*'
 ] as const;
 const userPermissionEnum = z.enum(PERMISSION_TYPES);
@@ -99,7 +103,7 @@ async function hasPermission(username: string, permission: UserPermission): Prom
   }
 
   let parts = permission.split('.');
-  while (parts.length > 2) {
+  while (parts.length > 1) {
     parts.pop();
     const permToCheck = parts.join('.') as UserPermission;
     if (permissions.includes(permToCheck)) {

@@ -1,0 +1,118 @@
+<template id="permissions-manager-template">
+  <section class="panel" @vue:mounted="mounted">
+    <div class="panel-header">User permissions</div>
+    <div class="panel-body stack">
+      <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
+      <div class="badge">Use * for full access.</div>
+      <div v-if="userEntries.length === 0" class="badge">No users yet.</div>
+      <div v-else class="permission-grid">
+        <div v-for="entry in userEntries" :key="entry.username" class="permission-row">
+          <div class="permission-user">
+            <div class="label">{{ entry.fullName || entry.username }}</div>
+            <div v-if="entry.fullName" class="badge">{{ entry.username }}</div>
+          </div>
+          <input
+            v-model="permissionInputs[entry.username]"
+            type="text"
+            class="input"
+            placeholder="thread.subscribe, thread.prompt, admin.codex"
+          />
+          <button class="btn primary" @click="savePermissions(entry.username)">Save</button>
+          <button class="btn" @click="clearPermissions(entry.username)">Clear</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+<script>
+  function PermissionsManager() {
+    return PetiteVue.reactive({
+      $template: '#permissions-manager-template',
+      backend: null,
+      errorMessage: '',
+      users: [],
+      permissionInputs: {},
+      permissionsByUsername: {},
+      mounted() {
+        this.backend = app.backend;
+        if (!this.backend) return;
+
+        this.backend.listen('auth.permissions', () => {
+          this.refreshPermissions();
+        });
+
+        this.backend.listen('permissions.updated', () => {
+          this.refreshPermissions();
+        });
+
+        this.backend.listen('error', (message) => {
+          if (!['INVALID_PERMISSIONS', 'FORBIDDEN'].includes(message?.code)) return;
+          this.errorMessage = message.message || 'Failed to update permissions.';
+        });
+
+        this.backend.listen('admin.permissions.list', ({ users, permissions }) => {
+          this.users = Array.isArray(users) ? users : [];
+          this.permissionsByUsername = permissions || {};
+          this.syncPermissionInputs();
+        });
+
+        this.backend.listen('permissions.value', ({ username, permissions }) => {
+          this.permissionsByUsername[username] = permissions;
+          this.setPermissionInput(username, permissions);
+        });
+
+        this.syncPermissionInputs();
+        this.refreshPermissions();
+      },
+      get userEntries() {
+        return this.users.map((user) => ({
+          username: user.username,
+          fullName: user.fullName,
+        }));
+      },
+      isAdmin() {
+        return this.backend?.auth?.hasPermission
+          ? this.backend.auth.hasPermission('admin')
+          : false;
+      },
+      refreshPermissions() {
+        if (!this.backend || !this.isAdmin()) return;
+        this.backend.send('admin.permissions.list');
+      },
+      setPermissionInput(username, permissions) {
+        const list = Array.isArray(permissions) ? permissions : [];
+        this.permissionInputs[username] = list.join(', ');
+      },
+      syncPermissionInputs() {
+        this.users.forEach((user) => {
+          if (!user?.username) return;
+          this.setPermissionInput(user.username, this.permissionsByUsername[user.username]);
+        });
+      },
+      savePermissions(username) {
+        this.errorMessage = '';
+        if (!username) {
+          this.errorMessage = 'Username is required.';
+          return;
+        }
+        const permissions = (this.permissionInputs[username] || '')
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+        this.backend.send('admin.permissions.set', {
+          username,
+          permissions,
+        });
+      },
+      clearPermissions(username) {
+        this.errorMessage = '';
+        if (!username) return;
+        this.permissionInputs[username] = '';
+        this.backend.send('admin.permissions.set', {
+          username,
+          permissions: [],
+        });
+      },
+    });
+  }
+</script>
