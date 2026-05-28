@@ -4,7 +4,9 @@
       <div>{{ timeLabel(event.timestamp) }}</div>
     </div>
     <div>
-      <div class="agent-message-body">{{ item.text }}</div>
+      <div class="agent-message-body">
+        <div v-scope="Markdown(item.text)"></div>
+      </div>
     </div>
   </div>
 </template>
