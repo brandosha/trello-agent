@@ -20,6 +20,7 @@ import { getPublicKey } from "./ssh.js";
 import { permissions, UserPermission, UserPermissions } from "./permissions.js";
 import { WSContext } from "hono/ws";
 import { Unsubscribe } from "./PubSub.js";
+import { upsertTrelloUser, UserIdentity } from "./users.js";
 
 const INITIAL_THREAD_EVENT_LIMIT = 50;
 const MAX_THREAD_EVENT_LIMIT = 200;
@@ -31,7 +32,8 @@ type WsMessage<T> = {
 class WsClient {
   ws: WSContext;
   origin: string | undefined;
-  email?: string;
+  username?: string;
+  user?: UserIdentity;
   permissions?: UserPermissions
   private _unsubscribePermissions?: Unsubscribe;
   codexThreads = new Map<string, Unsubscribe>();
@@ -51,12 +53,15 @@ class WsClient {
     this.ws.send(JSON.stringify(message));
   }
 
-  setEmail(email: string) {
-    this.email = email;
-    this.permissions = permissions.forUser(email);
+  setUser(user: UserIdentity) {
+    this.user = user;
+    this.username = user.username;
+    this.permissions = permissions.forUser(user.username);
     this.send({
       type: 'auth.success',
-      email,
+      username: user.username,
+      email: user.email,
+      fullName: user.fullName,
     })
 
     this._unsubscribePermissions?.();
@@ -123,8 +128,8 @@ function wsEndpoint<T>(schema: z.ZodSchema<T>, handler: (message: T, client: WsC
   }
 }
 
-function userFrom(email?: string) {
-  return email ? `user/${email}` : "user/unknown";
+function userFrom(username?: string) {
+  return username ? `user/${username}` : "user/unknown";
 }
 
 const trelloSetupSchema = z.object({
@@ -152,13 +157,13 @@ const trelloSetupEndpoint = wsEndpoint(trelloSetupSchema, async (message, client
     webhookOrigin: client.origin,
   });
 
-  const { email } = await getTrelloMember(token);
+  const user = await upsertTrelloUser(await getTrelloMember(token));
 
-  client.setEmail(email);
+  client.setUser(user);
   client.send({ type: "trello.setup.success" });
-  permissions.forUser(email).set(['*']);
+  permissions.forUser(user.username).set(['*']);
 
-  const authToken = await generateAuthToken({ email });
+  const authToken = await generateAuthToken({ username: user.username });
   client.send({
     type: "auth",
     authToken,
@@ -178,10 +183,10 @@ const trelloAuthEndpoint = wsEndpoint(trelloAuthSchema, async (message, client) 
     throw new WsError("TRELLO_NOT_CONFIGURED", "Trello is not configured.");
   }
 
-  const { email } = await getTrelloMember(token);
-  client.setEmail(email);
+  const user = await upsertTrelloUser(await getTrelloMember(token));
+  client.setUser(user);
 
-  const authToken = await generateAuthToken({ email });
+  const authToken = await generateAuthToken({ username: user.username });
   client.send({
     type: "auth",
     authToken,
@@ -208,10 +213,10 @@ const authEndpoint = wsEndpoint(authMessageSchema, async (message, client) => {
   } else {
     try {
       const payload = await verifyAuthToken(message.authToken);
-      if (typeof payload.email !== "string") {
+      if (typeof payload.username !== "string") {
         throw new WsError("INVALID_TOKEN", "Invalid auth token payload.");
       }
-      client.setEmail(payload.email);
+      client.setUser({ username: payload.username });
     } catch (err) {
       console.error("Failed to verify auth token:", err);
       client.send({
@@ -347,7 +352,7 @@ const abortEndpoint = wsEndpoint(abortMessageSchema, async (message, client) => 
     throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
   }
 
-  codex.thread(threadId).abort(userFrom(client.email));
+  codex.thread(threadId).abort(userFrom(client.username));
 });
 
 const promptMessageSchema = z.object({
@@ -364,12 +369,12 @@ const promptEndpoint = wsEndpoint(promptMessageSchema, async (message, client) =
     throw new WsError("NOT_SUBSCRIBED", `Not subscribed to thread ${threadId}.`);
   }
 
-  codex.thread(threadId).promptImmediately(prompt, userFrom(client.email))
+  codex.thread(threadId).promptImmediately(prompt, userFrom(client.username))
 });
 
 const permissionsSetSchema = z.object({
   type: z.literal("permissions.set"),
-  email: z.string(),
+  username: z.string(),
   permissions: z.array(z.string()),
 });
 
@@ -383,7 +388,7 @@ const permissionsSetEndpoint = wsEndpoint(permissionsSetSchema, async (message, 
   )) as UserPermission[];
 
   try {
-    await permissions.forUser(message.email).set(newPermissions);
+    await permissions.forUser(message.username).set(newPermissions);
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new WsError("INVALID_PERMISSIONS", "Invalid permissions format.");
@@ -404,13 +409,13 @@ const permissionsListEndpoint = wsEndpoint(permissionsListSchema, async (message
   
   const allPermissions = await permissions.all();
   const jsonPermissions: Record<string, UserPermission[] | undefined> = {};
-  Object.entries(allPermissions).forEach(([email, perms]) => {
+  Object.entries(allPermissions).forEach(([username, perms]) => {
     perms?.subscribe(p => client.send({
       type: "permissions.value",
-      email,
+      username,
       permissions: p
     }))
-    jsonPermissions[email] = perms?.value;
+    jsonPermissions[username] = perms?.value;
   });
   // const permissions = await listPermissions();
   // TODO: Remove this and update client side to handle 
