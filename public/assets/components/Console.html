@@ -30,7 +30,7 @@
             <div v-if="errorMessage" class="badge">{{ errorMessage }}</div>
           </div>
           <div v-else class="stack">
-            <div class="badge" v-if="authorized">Authorized as {{ memberId || 'unknown' }}</div>
+            <div class="badge" v-if="authorized">Authorized as {{ username || 'unknown' }}</div>
             <div class="badge" v-else>Authorization required to view threads.</div>
             <button v-if="!authorized" class="btn primary" @click="startAuth">Authorize Trello</button>
             <div v-if="statusMessage" class="badge">{{ statusMessage }}</div>
@@ -42,8 +42,8 @@
         <div class="panel-header">User permissions</div>
         <div class="panel-body stack">
           <div>
-            <div class="label">Trello member ID</div>
-            <input v-model="permissionMemberId" type="text" class="input" placeholder="member id" />
+            <div class="label">Trello username</div>
+            <input v-model="permissionUsername" type="text" class="input" placeholder="username" />
           </div>
           <div>
             <div class="label">Permissions (comma-separated)</div>
@@ -77,14 +77,14 @@
       apiSecretInput: '',
       statusMessage: '',
       errorMessage: '',
-      permissionMemberId: '',
+      permissionUsername: '',
       permissionList: '',
       configured: false,
       authorized: false,
       isAdmin: false,
-      memberId: null,
+      username: null,
       permissionEntries: [],
-      permissionsByEmail: {},
+      permissionsByUsername: {},
       mounted() {
         this.backend = app.backend;
         if (!this.backend) return;
@@ -134,12 +134,12 @@
         });
 
         this.backend.listen('permissions.list', ({ permissions }) => {
-          this.permissionsByEmail = permissions || {};
+          this.permissionsByUsername = permissions || {};
           this.syncPermissionEntries();
         });
 
-        this.backend.listen('permissions.value', ({ email, permissions }) => {
-          this.permissionsByEmail[email] = permissions;
+        this.backend.listen('permissions.value', ({ username, permissions }) => {
+          this.permissionsByUsername[username] = permissions;
           this.syncPermissionEntries();
         });
         this.loadDraftApiKey();
@@ -153,14 +153,14 @@
       },
       syncAuthState() {
         this.configured = !!this.backend?.configured;
-        this.authorized = !!this.backend?.auth?.email;
+        this.authorized = !!this.backend?.auth?.username;
         this.isAdmin = this.backend?.auth?.hasPermission
           ? this.backend.auth.hasPermission('admin')
           : false;
-        this.memberId = this.backend?.auth?.email || null;
+        this.username = this.backend?.auth?.username || null;
       },
       syncPermissionEntries() {
-        const permissions = this.permissionsByEmail;
+        const permissions = this.permissionsByUsername;
         this.permissionEntries = Object.entries(permissions).map(([id, perms]) => {
           const list = Array.isArray(perms) ? perms : [];
           return {
@@ -204,8 +204,8 @@
       },
       savePermissions() {
         this.errorMessage = '';
-        if (!this.permissionMemberId) {
-          this.errorMessage = 'Member id is required.';
+        if (!this.permissionUsername) {
+          this.errorMessage = 'Username is required.';
           return;
         }
         const permissions = this.permissionList
@@ -213,7 +213,7 @@
           .map((value) => value.trim())
           .filter(Boolean);
         this.backend.send('permissions.set', {
-          email: this.permissionMemberId,
+          username: this.permissionUsername,
           permissions,
         });
       },

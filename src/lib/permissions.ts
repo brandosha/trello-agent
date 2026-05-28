@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 
-import { db, permissionsTable } from "./database.js";
+import { db, permissionsTable, usersTable } from "./database.js";
 import { ValueSub } from "./PubSub.js";
 
 const PERMISSION_TYPES = [
@@ -33,33 +33,45 @@ function parsePermissions(permissions: string) {
 
 function listPermissionValues() {
   const rows = db.select({
-    userId: permissionsTable.userId,
+    username: permissionsTable.username,
     permissions: permissionsTable.permissions,
   })
     .from(permissionsTable)
     .all();
 
   return Object.fromEntries(
-    rows.map(({ userId, permissions }) => [userId, parsePermissions(permissions)])
+    rows.map(({ username, permissions }) => [username, parsePermissions(permissions)])
   );
 }
 
-function getPermissionValues(userId: string) {
+function getPermissionValues(username: string) {
   const permissions = db.select({ permissions: permissionsTable.permissions })
     .from(permissionsTable)
-    .where(eq(permissionsTable.userId, userId))
+    .where(eq(permissionsTable.username, username))
     .get()?.permissions;
 
   return permissions ? parsePermissions(permissions) : [];
 }
 
-function setPermissionValues(userId: string, permissions: readonly string[]) {
+function setPermissionValues(username: string, permissions: readonly string[]) {
+  const now = new Date();
+  db.insert(usersTable)
+    .values({ username, createdAt: now, updatedAt: now })
+    .onConflictDoNothing()
+    .run();
+
   db.insert(permissionsTable)
-    .values({ userId, permissions: serializePermissions(permissions) })
+    .values({ username, permissions: serializePermissions(permissions) })
     .onConflictDoUpdate({
-      target: permissionsTable.userId,
+      target: permissionsTable.username,
       set: { permissions: serializePermissions(permissions) }
     })
+    .run();
+}
+
+function deletePermissionValues(username: string) {
+  db.delete(permissionsTable)
+    .where(eq(permissionsTable.username, username))
     .run();
 }
 
@@ -71,19 +83,19 @@ async function listPermissions(): Promise<PermissionsIndex> {
   return permissionsIndex;
 }
 
-async function getPermissions(email: string): Promise<UserPermissionList> {
+async function getPermissions(username: string): Promise<UserPermissionList> {
   const index = await permissionsIndex;
-  if (index[email]) {
-    return index[email] ?? [];
+  if (index[username]) {
+    return index[username] ?? [];
   }
 
-  const permissions = userPermissionListSchema.parse(getPermissionValues(email));
-  index[email] = permissions;
+  const permissions = userPermissionListSchema.parse(getPermissionValues(username));
+  index[username] = permissions;
   return permissions;
 }
 
-async function hasPermission(email: string, permission: UserPermission): Promise<boolean> {
-  const permissions = await getPermissions(email);
+async function hasPermission(username: string, permission: UserPermission): Promise<boolean> {
+  const permissions = await getPermissions(username);
   if (!permissions) {
     return false;
   }
@@ -104,32 +116,32 @@ async function hasPermission(email: string, permission: UserPermission): Promise
   return false;
 }
 
-async function setPermissions(email: string, permissions: UserPermissionList): Promise<void> {
+async function setPermissions(username: string, permissions: UserPermissionList): Promise<void> {
   userPermissionListSchema.parse(permissions);
   const index = await permissionsIndex;
-  index[email] = permissions;
-  setPermissionValues(email, permissions);
+  index[username] = permissions;
+  setPermissionValues(username, permissions);
 }
 
 export class UserPermissions extends ValueSub<UserPermissionList> {
-  private _email: string;
+  private _username: string;
 
-  constructor(email: string, permissions: UserPermissionList) {
+  constructor(username: string, permissions: UserPermissionList) {
     super(permissions);
-    this._email = email;
+    this._username = username;
   }
 
-  setValue(permissions: UserPermissionList) {
+  private setValue(permissions: UserPermissionList) {
     super.set(permissions);
   }
 
   async set(permissions: UserPermissionList) {
-    await setPermissions(this._email, permissions);
+    await setPermissions(this._username, permissions);
     super.set(permissions);
   }
 
   async has(permission: UserPermission) {
-    return await hasPermission(this._email, permission);
+    return await hasPermission(this._username, permission);
   }
 }
 
@@ -139,24 +151,54 @@ class Permissions {
 
   constructor() {
     permissionsIndex.then(perms => {
-      Object.entries(perms).forEach(([email, p]) => {
-        const userPermissions = this.forUser(email);
-        userPermissions.setValue(p ?? []);
+      Object.entries(perms).forEach(([username, p]) => {
+        const userPermissions = this.forUser(username);
+        userPermissions.set(p ?? []);
       })
     })
   }
 
-  forUser(email: string) {
-    if (!this._users[email]) {
-      this._users[email] = new UserPermissions(email, []);
+  forUser(username: string) {
+    if (!this._users[username]) {
+      this._users[username] = new UserPermissions(username, []);
     }
 
-    return this._users[email];
+    return this._users[username];
   }
 
   async all() {
     await permissionsIndex;
     return this._users;
+  }
+
+  async migrateUserKey(fromUsername: string, toUsername: string) {
+    if (fromUsername === toUsername) {
+      return;
+    }
+
+    const index = await permissionsIndex;
+    const fromPermissions = index[fromUsername] ??
+      userPermissionListSchema.parse(getPermissionValues(fromUsername));
+
+    if (!fromPermissions.length) {
+      return;
+    }
+
+    const toPermissions = index[toUsername] ??
+      userPermissionListSchema.parse(getPermissionValues(toUsername));
+    const mergedPermissions = userPermissionListSchema.parse(Array.from(new Set([
+      ...toPermissions,
+      ...fromPermissions,
+    ])));
+
+    index[toUsername] = mergedPermissions;
+    delete index[fromUsername];
+    setPermissionValues(toUsername, mergedPermissions);
+    deletePermissionValues(fromUsername);
+
+    this.forUser(toUsername).set(mergedPermissions);
+    this._users[fromUsername]?.set([]);
+    delete this._users[fromUsername];
   }
 }
 

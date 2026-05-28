@@ -1,5 +1,6 @@
 import { codex } from "./codex.js";
 import { logger } from "./logger.js"
+import { permissions } from "./permissions.js";
 import { TrelloWebhookRequest, getThreadUrl, makeTrelloApiRequest } from "./trello.js";
 import { multilineString } from "./utils.js";
 
@@ -46,6 +47,17 @@ export async function trelloWebhookHandler(request: TrelloWebhookRequest) {
   const hasAgentLabel = labels.some((label: any) => label.name.toLowerCase().includes("agent"));
   if (!hasAgentLabel) {
     console.log("Trello card does not have an agent label, skipping");
+    return;
+  }
+
+  const username = request.body.action.memberCreator?.username;
+  if (typeof username !== "string" || !username) {
+    console.warn("Trello webhook action does not contain memberCreator.username, skipping");
+    return;
+  }
+
+  if (!await permissions.forUser(username).has("thread.prompt")) {
+    console.log(`Trello webhook action owner ${username} does not have thread.prompt, skipping`);
     return;
   }
 

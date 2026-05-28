@@ -3,7 +3,7 @@ import { SignJWT, jwtVerify, generateSecret, JWTPayload, exportJWK, importJWK } 
 import { getConfigValue, setConfigValue } from "./database.js";
 
 interface AuthPayload extends JWTPayload {
-  email: string;
+  username: string;
 }
 
 const JWT_ALG = "HS256";

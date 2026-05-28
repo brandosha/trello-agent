@@ -5,8 +5,16 @@ export const configTable = sqliteTable("config", {
   value: text("value").notNull(),
 });
 
+export const usersTable = sqliteTable("users", {
+  username: text("username").primaryKey(),
+  email: text("email"),
+  fullName: text("full_name"),
+  createdAt: int("created_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
+  updatedAt: int("updated_at", { mode: "timestamp" }).notNull().$default(() => new Date()),
+});
+
 export const permissionsTable = sqliteTable("permissions", {
-  userId: text("user_id").primaryKey(),
+  username: text("username").primaryKey().references(() => usersTable.username),
   permissions: text("permissions").notNull(), // Comma-separated list of permissions
 });
 

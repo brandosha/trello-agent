@@ -3,7 +3,9 @@ class BackendClient {
     const ws = this._ws = new RobustWebsocket("/ws");
 
     this.auth = {
+      username: null,
       email: null,
+      fullName: null,
       permissions: [],
       _token: window.localStorage.getItem('trelloAgentAuthToken') || undefined,
       hasPermission(permission) {
@@ -47,8 +49,10 @@ class BackendClient {
       window.localStorage.setItem('trelloAgentAuthToken', authToken);
     });
 
-    this.listen('auth.success', ({ email }) => {
+    this.listen('auth.success', ({ username, email, fullName }) => {
+      this.auth.username = username;
       this.auth.email = email;
+      this.auth.fullName = fullName;
 
       // If there are any active thread listeners, re-subscribe to ensure we continue receiving updates after a reconnect or auth change
       Object.entries(this._threadListeners).forEach(([threadId, listeners]) => {
@@ -71,7 +75,6 @@ class BackendClient {
       url.searchParams.set('key', key);
       url.searchParams.set('return_url', returnUrl);
 
-      debugger;
       location.assign(url.toString());
     });
 
