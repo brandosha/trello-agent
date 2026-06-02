@@ -34,3 +34,19 @@ agent git operations live in the multiagent-container `/agents` volume.
 
 The trello-agent container still sets `HOME=/app/data` for its own runtime data.
 Database migrations are copied into the runtime image at `/app/drizzle`.
+
+## Internal MCP Server
+
+trello-agent serves its user-facing app/websocket traffic on `config.port`
+(`7654` by default). It also starts a separate MCP HTTP server on
+`config.mcpPort` (`7655` by default). Docker Compose exposes the MCP port only
+inside the compose network so sandboxed agents in `multiagent-container` can
+reach it at `config.mcpInternalUrl` (`http://trello-agent:7655/mcp` by
+default) without publishing it to the host.
+
+Each sandboxed thread receives a per-thread MCP config update before prompts.
+The config includes a JWT bearer token and `X-Agent-ID` header for that
+thread's string ID. trello-agent rejects MCP requests unless the JWT agent ID
+matches the `X-Agent-ID` header and the string thread ID exists locally. If
+`config.mcpJwtSecret` is not set, trello-agent generates a secret and persists
+it in the app database.

@@ -4,6 +4,8 @@ services:
     image: trello-agent:latest
     ports:
       - "7654:7654"
+    expose:
+      - "7655"
     volumes:
       - trello-agent-data:/app/data
     depends_on:

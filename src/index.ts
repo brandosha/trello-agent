@@ -11,6 +11,7 @@ import { websocketHandler } from "./lib/websocket.js";
 import { TRELLO_WEBHOOK_ROUTE, verifyTrelloWebhookRequest } from "./lib/trello.js";
 import { trelloWebhookHandler } from "./lib/webhooks.js";
 import { logger } from "./lib/logger.js";
+import { startMcpHttpServer } from "./lib/mcp-http.js";
 
 
 const app = new Hono();
@@ -62,3 +63,5 @@ serve({
 }, info => {
   console.log(`Server running on port ${info.port}`);
 });
+
+await startMcpHttpServer();

@@ -9,6 +9,7 @@ import { config } from "../../config.js";
 import { threadsDir } from "./paths.js";
 import { HistorySub, PubSub } from "./PubSub.js";
 import { db, threadsTable } from "./database.js";
+import { createMcpBearerToken, getMcpInternalUrl, MCP_AGENT_ID_HEADER } from "./mcp-auth.js";
 
 interface PromptEvent {
   type: "input.prompt";
@@ -117,6 +118,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   private _connectPromise?: Promise<void>;
   private _pendingEventsRequest?: PendingEventsRequest;
   private _eventsRequestQueue: Promise<unknown> = Promise.resolve();
+  private _lastMcpConfigJson?: string;
 
   constructor(id: string, options: ThreadOptions = {}) {
     super();
@@ -167,6 +169,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
 
     const message = assertStringPrompt(prompt);
     await this.connect();
+    await this.configureTrelloMcp(from);
     this.send({ type: "prompt", from, message });
     return { turnId: "", events: [] };
   }
@@ -260,6 +263,36 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
       throw new Error(`Thread ${this.id} is not connected to multiagent-container.`);
     }
     this._ws.send(JSON.stringify(message));
+  }
+
+  private async configureTrelloMcp(from: string) {
+    const token = await createMcpBearerToken(this.id);
+    const message = {
+      type: "config",
+      from,
+      config: {
+        codex: {
+          config: {
+            mcp_servers: {
+              trello_agent: {
+                url: getMcpInternalUrl(),
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  [MCP_AGENT_ID_HEADER]: this.id,
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const messageJson = JSON.stringify(message);
+    if (messageJson === this._lastMcpConfigJson) {
+      return;
+    }
+
+    this.send(message);
+    this._lastMcpConfigJson = messageJson;
   }
 
   private ensureThreadRecord() {
