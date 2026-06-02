@@ -5,5 +5,5 @@
     "module": "node20",
     "skipLibCheck": true
   },
-  "exclude": ["node_modules", "dist", "data"]
+  "exclude": ["node_modules", "dist", "data", "multiagent-container"]
 }

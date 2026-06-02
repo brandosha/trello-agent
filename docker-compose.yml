@@ -6,7 +6,24 @@ services:
       - "7654:7654"
     volumes:
       - trello-agent-data:/app/data
+    depends_on:
+      - multiagent-container
+    restart: unless-stopped
+
+  multiagent-container:
+    build: ./multiagent-container
+    image: multiagent-container:latest
+    ports:
+      - "8001:80"
+    volumes:
+      - multiagent-container-data:/agents
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      - NET_ADMIN
     restart: unless-stopped
 
 volumes:
   trello-agent-data:
+  multiagent-container-data:

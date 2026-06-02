@@ -10,3 +10,6 @@ data
 config.ts
 npm-debug.log*
 pnpm-debug.log*
+
+# Keep the submodule out of the trello-agent image build context.
+multiagent-container/

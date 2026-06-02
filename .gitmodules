@@ -1,0 +1,4 @@
+[submodule "multiagent-container"]
+	path = multiagent-container
+	url = git@github.com:brandosha/multiagent-container.git
+	branch = feature/external-interface-improvements
