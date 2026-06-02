@@ -11,17 +11,10 @@ services:
     restart: unless-stopped
 
   multiagent-container:
-    build: ./multiagent-container
-    image: multiagent-container:latest
-    ports:
-      - "8001:80"
-    volumes:
-      - multiagent-container-data:/agents
-    cap_add:
-      - SETUID
-      - SETGID
-      - CHOWN
-      - NET_ADMIN
+    extends:
+      file: ./multiagent-container/docker-compose.yml
+      service: multiagent-container
+    ports: !reset []
     restart: unless-stopped
 
 volumes:
