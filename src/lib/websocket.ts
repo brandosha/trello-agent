@@ -251,12 +251,12 @@ const subscribeMessageSchema = z.object({
   threadId: z.string(),
 });
 
-function getThreadEventPage(thread: SharedThread, limit: number, offset: number) {
-  const events = thread.getEvents(limit + 1, offset);
+async function getThreadEventPage(thread: SharedThread, limit: number, offset: number) {
+  const events = await thread.getEvents(limit + 1, offset);
   const hasMore = events.length > limit;
 
   return {
-    events: hasMore ? events.slice(1) : events,
+    events: hasMore ? events.slice(0, limit) : events,
     hasMore,
   };
 }
@@ -293,7 +293,7 @@ const subscribeEndpoint = wsEndpoint(subscribeMessageSchema, async (message, cli
   });
   client.codexThreads.set(threadId, unsubscribe);
 
-  const page = getThreadEventPage(thread, INITIAL_THREAD_EVENT_LIMIT, 0);
+  const page = await getThreadEventPage(thread, INITIAL_THREAD_EVENT_LIMIT, 0);
   client.send({
     type: "thread.events",
     threadId,
@@ -325,7 +325,7 @@ const threadEventsListEndpoint = wsEndpoint(threadEventsListSchema, async (messa
 
   const limit = message.limit ?? INITIAL_THREAD_EVENT_LIMIT;
   const offset = message.offset ?? 0;
-  const page = getThreadEventPage(codex.thread(threadId), limit, offset);
+  const page = await getThreadEventPage(codex.thread(threadId), limit, offset);
 
   client.send({
     type: "thread.events",

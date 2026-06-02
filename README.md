@@ -23,11 +23,14 @@ docker compose up --build
 The container uses pnpm through Corepack for dependency installation. It builds
 with `config.example.ts` as `config.ts`, which sets the server port to `7654`.
 Runtime Trello configuration is stored in the app data directory, so mount
-`/app/data` if you want configuration, database state, and thread workspaces to
-persist across container restarts.
+`/app/data` if you want configuration and database state to persist across
+container restarts.
 
-The container also sets `HOME=/app/data`, so Codex CLI authentication and
-session files under `~/.codex` are stored in the same persistent volume. The
-runtime image also sets root's home directory to `/app/data`, so OpenSSH looks
-for default keys and known hosts under `/app/data/.ssh`.
+Agent thread execution is delegated to the `multiagent-container` service. In
+Docker Compose, trello-agent reaches it at `http://multiagent-container`; local
+development can override `config.multiagentContainerUrl` in `config.ts`.
+Codex CLI authentication, sandboxed thread workspaces, and the SSH key used by
+agent git operations live in the multiagent-container `/agents` volume.
+
+The trello-agent container still sets `HOME=/app/data` for its own runtime data.
 Database migrations are copied into the runtime image at `/app/drizzle`.

@@ -1,51 +1,14 @@
-import { existsSync, mkdirSync } from "fs";
+import { EventEmitter } from "events";
 import fs from "fs/promises";
-import { ChildProcessWithoutNullStreams, spawn } from "child_process";
-import path from "path";
 
-import { Codex, Input, Thread, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
-import { and, desc, eq } from "drizzle-orm";
+import type { Input, ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
+import { eq } from "drizzle-orm";
+import { WebSocket } from "ws";
 
-import { rootDir, dataDir, reposDir } from "./paths.js";
+import { config } from "../../config.js";
+import { threadsDir } from "./paths.js";
 import { HistorySub, PubSub } from "./PubSub.js";
-import { randomStr } from "./utils.js";
-import { db, threadEventsTable, threadsTable } from "./database.js";
-
-
-const codexInterface = new Codex({
-  config: {
-    mcp_servers: {
-      'trello-agent': {
-        command: 'node',
-        args: [`${rootDir}/dist/src/mcp.js`],
-        default_tools_approval_mode: 'approve',
-      }
-    },
-    sandbox_mode: 'danger-full-access',
-    approval_policy: 'on-request',
-    approvals_reviewer: 'auto_review',
-    sandbox_workspace_write: {
-      writable_roots: [reposDir],
-      network_access: true,
-    }
-  }
-});
-
-const codexCliPath = process.env.CODEX_CLI_PATH
-  ?? path.join(rootDir, "node_modules", ".bin", process.platform === "win32" ? "codex.cmd" : "codex");
-
-const threadsDir = `${dataDir}/threads`;
-if (!existsSync(threadsDir)) {
-  mkdirSync(threadsDir, { recursive: true });
-}
-
-interface PromptQueuedEvent {
-  type: "input.prompt.queued";
-  turnId: string;
-  from: string;
-  prompt: Input;
-  options: TurnOptions;
-}
+import { db, threadsTable } from "./database.js";
 
 interface PromptEvent {
   type: "input.prompt";
@@ -60,6 +23,12 @@ interface AbortEvent {
   from: string;
 }
 
+interface ThreadConfigUpdatedEvent {
+  type: "thread.config.updated";
+  from: string;
+  config: unknown;
+}
+
 interface TurnAbortEvent {
   type: "turn.abort";
   turnId: string;
@@ -71,234 +40,238 @@ interface TurnErrorEvent {
   error: {
     name: string;
     message: string;
-  }
+  };
 }
 
-type SharedThreadEvent = (
+export type SharedThreadEvent = (
   (ThreadEvent & { turnId: string }) |
-  PromptQueuedEvent |
   PromptEvent |
   AbortEvent |
+  ThreadConfigUpdatedEvent |
   TurnAbortEvent |
   TurnErrorEvent
 ) & {
   id: string;
-  timestamp: Date
+  timestamp: Date | string;
 };
-
-function withPromptAttribution(prompt: Input, from: string): Input {
-  const prefix = `[trello-agent/${from}]\n`;
-  if (typeof prompt === "string") {
-    return `${prefix}${prompt}`;
-  }
-
-  const firstTextIndex = prompt.findIndex(item => item.type === "text");
-  if (firstTextIndex === -1) {
-    return [{ type: "text", text: prefix }, ...prompt];
-  }
-
-  return prompt.map((item, index) => {
-    if (index !== firstTextIndex || item.type !== "text") {
-      return item;
-    }
-    return { ...item, text: `${prefix}${item.text}` };
-  });
-}
-
-function generateEventId() {
-  return randomStr(5);
-}
 
 interface SharedThreadTurn {
   turnId: string;
   events: SharedThreadEvent[];
 }
 
+type RemoteThreadEventsResponse = {
+  type: "thread.events";
+  threadId: number;
+  limit?: number;
+  offset?: number;
+  events: SharedThreadEvent[];
+};
+
+type PendingEventsRequest = {
+  resolve: (events: SharedThreadEvent[]) => void;
+  reject: (error: Error) => void;
+};
+
+type CodexLogin = {
+  process: EventEmitter;
+  output: HistorySub<{ stream: "stdout" | "stderr"; text: string }>;
+} | undefined;
+
+function multiagentBaseUrl() {
+  return config.multiagentContainerUrl ?? "http://multiagent-container";
+}
+
+function toWebSocketUrl(path: string) {
+  const url = new URL(path, multiagentBaseUrl());
+  if (url.protocol === "https:") {
+    url.protocol = "wss:";
+  } else if (url.protocol === "http:") {
+    url.protocol = "ws:";
+  }
+  return url;
+}
+
+function threadWebSocketUrl(threadId: string) {
+  return toWebSocketUrl(`/thread/${encodeURIComponent(threadId)}`);
+}
+
+function codexLoginWebSocketUrl() {
+  return toWebSocketUrl("/codex-login");
+}
+
+function assertStringPrompt(prompt: Input): string {
+  if (typeof prompt === "string") {
+    return prompt;
+  }
+
+  throw new Error("multiagent-container currently accepts string prompts only");
+}
+
 export class SharedThread extends PubSub<SharedThreadEvent> {
   id: string;
   workspaceDir: string;
 
-  private _threadDir: string;
-  private _thread: Promise<Thread>;
-  private _threadQueue: Promise<Thread>;
-  private _abortLock = Promise.resolve(new AbortController());
+  private _knownBeforeCreate: boolean;
+  private _ws?: WebSocket;
+  private _connectPromise?: Promise<void>;
+  private _pendingEventsRequest?: PendingEventsRequest;
+  private _eventsRequestQueue: Promise<unknown> = Promise.resolve();
 
   constructor(id: string, options: ThreadOptions = {}) {
-    super()
+    super();
 
     if (!/^[a-zA-Z0-9\_\-]+$/.test(id)) {
       throw new Error("Invalid thread ID");
     }
 
     this.id = id;
-
-    this._threadDir = `${threadsDir}/${id}`;
-    this.workspaceDir = `${this._threadDir}/workspace`;
-    const mkdir = fs.mkdir(this.workspaceDir, { recursive: true });
-    options = this.configureOptions(options);
-
-    this._thread = mkdir.then(() => {
-      this.ensureThreadRecord();
-      return this.loadThread(options);
-    });
-    this._threadQueue = this._thread;
-  }
-
-  private configureOptions(options: ThreadOptions) {
-    return {
-      ...options,
-      workingDirectory: this.workspaceDir,
-      skipGitRepoCheck: true,
-    };
+    this.workspaceDir = `${threadsDir}/${id}/workspace`;
+    this._knownBeforeCreate = this.ensureThreadRecord();
   }
 
   async isNew() {
-    await this._thread;
-    const event = db.select({ id: threadEventsTable.id })
-      .from(threadEventsTable)
-      .where(eq(threadEventsTable.threadId, this.id))
-      .limit(1)
-      .get();
-    return !event;
-  }
-
-  getEvents(limit = 100, offset = 0) {
-    const rows = db.select({ event: threadEventsTable.event })
-      .from(threadEventsTable)
-      .where(eq(threadEventsTable.threadId, this.id))
-      .orderBy(desc(threadEventsTable.id))
-      .limit(limit)
-      .offset(offset)
-      .all();
-
-    return rows
-      .map(({ event }) => event as SharedThreadEvent)
-      .reverse();
+    return !this._knownBeforeCreate;
   }
 
   async setOptions(options: ThreadOptions) {
-    const thread = await this._thread;
-    options = this.configureOptions(options);
-    if (thread.id) {
-      this._thread = Promise.resolve(codexInterface.resumeThread(thread.id, options));
-    } else {
-      this._thread = Promise.resolve(codexInterface.startThread(options));
-    }
+    // ThreadOptions applied to local Codex threads are intentionally ignored now.
+    // Runtime configuration should be sent through multiagent-container config messages.
+  }
+
+  async getEvents(limit = 100, offset = 0) {
+    const request = async () => {
+      await this.connect();
+      return new Promise<SharedThreadEvent[]>((resolve, reject) => {
+        this._pendingEventsRequest = { resolve, reject };
+        this.send({ type: "events.get", limit, offset });
+      });
+    };
+
+    const result = this._eventsRequestQueue.then(request, request);
+    this._eventsRequestQueue = result.catch(() => undefined);
+    return result;
   }
 
   promptImmediately(prompt: Input, from: string, options: TurnOptions = {}) {
-    this.abort(from);
+    this.abort(from).catch((error) => {
+      console.error(`Failed to abort thread ${this.id} before prompt:`, error);
+    });
     return this.queueInput(prompt, from, options);
   }
 
-  queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
-    const turnId = generateEventId();
-    const result: SharedThreadTurn = {
-      turnId,
-      events: []
-    };
-    
-    const queuedEvent: SharedThreadEvent = {
-      type: "input.prompt.queued",
-      turnId,
-      from,
-      prompt,
-      options,
-      id: generateEventId(),
-      timestamp: new Date(),
+  async queueInput(prompt: Input, from: string, options: TurnOptions = {}): Promise<SharedThreadTurn> {
+    if (Object.keys(options).length > 0) {
+      console.warn("TurnOptions are not forwarded to multiagent-container yet.");
     }
-    result.events.push(queuedEvent);
-    this.publish(queuedEvent);
-    this.recordEvent(queuedEvent);
-    const promise = this._threadQueue.then(async (thread) => {
-      const inputEvent: SharedThreadEvent = {
-        type: "input.prompt",
-        turnId,
-        from,
-        prompt,
-        options,
-        id: generateEventId(),
-        timestamp: new Date(),
-      };
-      result.events.push(inputEvent);
-      this.publish(inputEvent);
-      this.recordEvent(inputEvent);
 
-      const abortController = new AbortController();
-      let resolveAbortLock: () => void = () => {};
-      this._abortLock = new Promise((resolve) => {
-        resolveAbortLock = () => resolve(abortController);
-      });
-
-      options.signal = abortController.signal;
-      try {
-        const { events } = await thread.runStreamed(withPromptAttribution(prompt, from), options);
-        for await (const event of events) {
-          const sharedEvent: SharedThreadEvent = {
-            ...event,
-            turnId,
-            id: generateEventId(),
-            timestamp: new Date(),
-          };
-          result.events.push(sharedEvent);
-          this.publish(sharedEvent);
-          this.recordEvent(sharedEvent);
-
-          if (event.type === "item.completed") {
-            resolveAbortLock();
-          }
-        }
-      } catch (err: any) {
-        if (err.name === "AbortError") {
-          const abortEvent: SharedThreadEvent = {
-            type: "turn.abort",
-            turnId,
-            id: generateEventId(),
-            timestamp: new Date(),
-          };
-          result.events.push(abortEvent);
-          this.publish(abortEvent);
-          this.recordEvent(abortEvent);
-        } else {
-          const errorEvent: SharedThreadEvent = {
-            type: "turn.error",
-            turnId,
-            error: {
-              name: err.name,
-              message: err.message,
-            },
-            id: generateEventId(),
-            timestamp: new Date(),
-          };
-          result.events.push(errorEvent);
-          this.publish(errorEvent);
-          this.recordEvent(errorEvent);
-        }
-      }
-      
-      resolveAbortLock(); // In case the turn completes without emitting an item.completed event, we want to make sure to release the lock
-      return thread;
-    });
-    this._threadQueue = promise;
-
-    return promise.then(() => result);
+    const message = assertStringPrompt(prompt);
+    await this.connect();
+    this.send({ type: "prompt", from, message });
+    return { turnId: "", events: [] };
   }
 
   async abort(from: string): Promise<void> {
-    const abortEvent: SharedThreadEvent = {
-      type: "input.abort",
-      id: generateEventId(),
-      timestamp: new Date(),
-      from,
-    };
-    this.publish(abortEvent);
-    this.recordEvent(abortEvent);
+    await this.connect();
+    this.send({ type: "abort", from });
+  }
 
-    const abortController = await this._abortLock;
-    abortController.abort();
+  destroy() {
+    this.abort("system/destroy").catch((error) => {
+      console.error(`Failed to destroy thread ${this.id}:`, error);
+    });
+    this._ws?.close();
+  }
+
+  private connect() {
+    if (this._ws?.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+
+    if (this._connectPromise) {
+      return this._connectPromise;
+    }
+
+    this._connectPromise = new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(threadWebSocketUrl(this.id));
+      this._ws = ws;
+
+      ws.on("open", () => {
+        resolve();
+      });
+
+      ws.on("message", (data) => {
+        this.handleMessage(data.toString());
+      });
+
+      ws.on("error", (error) => {
+        this._pendingEventsRequest?.reject(error instanceof Error ? error : new Error(String(error)));
+        this._pendingEventsRequest = undefined;
+        reject(error);
+      });
+
+      ws.on("close", () => {
+        this._pendingEventsRequest?.reject(new Error(`multiagent-container thread ${this.id} disconnected`));
+        this._pendingEventsRequest = undefined;
+        this._ws = undefined;
+        this._connectPromise = undefined;
+      });
+    });
+
+    return this._connectPromise;
+  }
+
+  private handleMessage(data: string) {
+    let message: any;
+    try {
+      message = JSON.parse(data);
+    } catch (error) {
+      console.error(`Invalid message from multiagent-container for thread ${this.id}:`, data);
+      return;
+    }
+
+    if (message.type === "thread.connected") {
+      return;
+    }
+
+    if (message.type === "thread.events") {
+      const eventsResponse = message as RemoteThreadEventsResponse;
+      this._pendingEventsRequest?.resolve(eventsResponse.events);
+      this._pendingEventsRequest = undefined;
+      return;
+    }
+
+    if (message.type === "request.error") {
+      this._pendingEventsRequest?.reject(new Error(message.message ?? "multiagent-container request failed"));
+      this._pendingEventsRequest = undefined;
+      return;
+    }
+
+    if (typeof message.type === "string" && typeof message.id === "string") {
+      this.publish(message as SharedThreadEvent);
+      return;
+    }
+
+    console.warn(`Unhandled message from multiagent-container for thread ${this.id}:`, message);
+  }
+
+  private send(message: Record<string, unknown>) {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`Thread ${this.id} is not connected to multiagent-container.`);
+    }
+    this._ws.send(JSON.stringify(message));
   }
 
   private ensureThreadRecord() {
+    const existing = db.select({ id: threadsTable.id })
+      .from(threadsTable)
+      .where(eq(threadsTable.id, this.id))
+      .get();
+
+    if (existing) {
+      return true;
+    }
+
     const now = new Date();
     db.insert(threadsTable)
       .values({
@@ -307,163 +280,109 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
         createdAt: now,
         updatedAt: now,
       })
-      .onConflictDoNothing()
       .run();
-  }
-
-  private loadThread(options: ThreadOptions) {
-    const threadRecord = db.select({ codexThreadId: threadsTable.codexThreadId })
-      .from(threadsTable)
-      .where(eq(threadsTable.id, this.id))
-      .get();
-
-    let codexThreadId = threadRecord?.codexThreadId;
-    if (!codexThreadId) {
-      const startedEvent = db.select({ event: threadEventsTable.event })
-        .from(threadEventsTable)
-        .where(and(
-          eq(threadEventsTable.threadId, this.id),
-          eq(threadEventsTable.type, "thread.started")
-        ))
-        .orderBy(desc(threadEventsTable.id))
-        .limit(1)
-        .get()?.event as SharedThreadEvent | undefined;
-
-      if (
-        startedEvent?.type === "thread.started"
-        && "thread_id" in startedEvent
-        && typeof startedEvent.thread_id === "string"
-      ) {
-        codexThreadId = startedEvent.thread_id;
-        this.setCodexThreadId(codexThreadId);
-      }
-    }
-
-    return codexThreadId
-      ? codexInterface.resumeThread(codexThreadId, options)
-      : codexInterface.startThread(options);
-  }
-
-  private setCodexThreadId(codexThreadId: string) {
-    db.update(threadsTable)
-      .set({
-        codexThreadId,
-        updatedAt: new Date(),
-      })
-      .where(eq(threadsTable.id, this.id))
-      .run();
-  }
-
-  private recordEvent(event: SharedThreadEvent) {
-    db.insert(threadEventsTable)
-      .values({
-        threadId: this.id,
-        turnId: "turnId" in event ? event.turnId : null,
-        type: event.type,
-        event,
-        timestamp: event.timestamp,
-      })
-      .run();
-
-    if (event.type === "thread.started" && "thread_id" in event && typeof event.thread_id === "string") {
-      this.setCodexThreadId(event.thread_id);
-    }
-  }
-
-  destroy() {
-    this.abort('system/destroy');
+    return false;
   }
 }
 
 class CodexSharedThreads {
   private threads: Map<string, SharedThread> = new Map();
+  private _login: CodexLogin;
 
   async threadExists(id: string) {
-    try {
-      await fs.access(`${threadsDir}/${id}/workspace`);
-      return true;
-    } catch {
-      return false;
-    }
+    const row = db.select({ id: threadsTable.id })
+      .from(threadsTable)
+      .where(eq(threadsTable.id, id))
+      .get();
+    return Boolean(row);
   }
 
   async listThreads() {
-    const entries = await fs.readdir(threadsDir, { withFileTypes: true });
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name);
+    return db.select({ id: threadsTable.id })
+      .from(threadsTable)
+      .all()
+      .map(({ id }) => id);
   }
 
   thread(id: string, options?: ThreadOptions) {
     if (this.threads.has(id)) {
       return this.threads.get(id)!;
-    } else {
-      const thread = new SharedThread(id, options);
-      this.threads.set(id, thread);
-      return thread;
     }
+
+    const thread = new SharedThread(id, options);
+    this.threads.set(id, thread);
+    return thread;
   }
 
-  private _login: CodexLogin;
   login() {
     if (this._login) {
       return this._login;
     }
 
-    const login = this._login = {
-      process: spawn(codexCliPath, ["login", "--device-auth"], {
-        env: process.env,
-        timeout: 600000
-      }),
-      output: new HistorySub()
+    const output = new HistorySub<{ stream: "stdout" | "stderr"; text: string }>();
+    const process = new EventEmitter();
+    const ws = new WebSocket(codexLoginWebSocketUrl());
+    let closed = false;
+
+    const closeLogin = (code: unknown, signal: unknown) => {
+      if (closed) {
+        return;
+      }
+
+      closed = true;
+      process.emit("close", code, signal);
+      this._login = undefined;
     };
 
-    login.process.stdout.on("data", (data) => {
-      login.output.publish({ stream: 'stdout', text: data.toString() });
-    });
+    this._login = { process, output };
 
-    login.process.stderr.on("data", (data) => {
-      login.output.publish({ stream: 'stderr', text: data.toString() });
-    });
-
-    login.process.on("close", (code, signal) => {
-      this._login = undefined;
-      if (signal == null && code === 0) {
-        setupDefaultThread().catch(console.error);
+    ws.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        if (message.type === "codex.login.output") {
+          output.publish({ stream: message.stream, text: message.text });
+        } else if (message.type === "codex.login.error") {
+          process.emit("error", new Error(message.message));
+        } else if (message.type === "codex.login.exit") {
+          closeLogin(message.code, message.signal);
+          if (message.signal == null && message.code === 0) {
+            setupDefaultThread().catch(console.error);
+          }
+        }
+      } catch (error) {
+        process.emit("error", error);
       }
     });
 
-    return login;
+    ws.on("error", (error) => {
+      process.emit("error", error);
+    });
+
+    ws.on("close", () => {
+      closeLogin(undefined, undefined);
+    });
+
+    return this._login;
   }
 }
-type CodexLogin = {
-  process: ChildProcessWithoutNullStreams;
-  output: HistorySub<{ stream: 'stdout' | 'stderr', text: string }>;
-} | undefined;
 
 export const codex = new CodexSharedThreads();
 
-
 export const DEFAULT_AGENT_INSTRUCTIONS = `
-You are the Trello Agent Manager. This is your workspace where you can create and manage any resources you need to operate. memory/ is where you can store any persistent information you want to remember. Use memory/INDEX.md to to help you navigate your memories. You can create files and folders as needed to organize your workspace.
-You also have access to the trello API through the Trello mcp tool. Use it to understand trello boards, lists, and cards, and to create and manage them as needed when instructed.
+You are the Trello Agent Manager. This is your workspace where you can create and manage any resources you need to operate. memory/ is where you can store any persistent information you want to remember. Use memory/INDEX.md to to help you navigate your memories. You can create files and folders as needed to organize them.
 
-You do not work on tasks directly, the sytem will create seperate threads for each task and assign agents to them. Your role is to create and modify tasks in Trello as instructed.
+You do not work on tasks directly, the system will create separate threads for each task and assign agents to them. Your role is to create and modify tasks in Trello as instructed.
 `.trim();
 
 const defaultThread = codex.thread("default", {
-  sandboxMode: 'workspace-write',
+  sandboxMode: "workspace-write",
 });
+
 async function setupDefaultThread() {
-  await defaultThread.isNew().then(async (isNew) => {
-    const { workspaceDir } = defaultThread;
+  const isNew = await defaultThread.isNew();
+  await fs.mkdir(defaultThread.workspaceDir, { recursive: true }).catch(() => {});
 
-    await fs.mkdir(`${workspaceDir}/memory`, { recursive: true });
-    await fs.writeFile(`${workspaceDir}/memory/INDEX.md`, "No memories yet.", { flag: "wx" }).catch(() => {});
-    await fs.writeFile(`${workspaceDir}/AGENTS.md`, DEFAULT_AGENT_INSTRUCTIONS);
-
-    if (isNew) {
-      defaultThread.promptImmediately("Introduce yourself.", "system");
-    }
-  });
+  if (isNew) {
+    defaultThread.promptImmediately(`${DEFAULT_AGENT_INSTRUCTIONS}\n\nIntroduce yourself.`, "system");
+  }
 }

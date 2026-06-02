@@ -1,34 +1,19 @@
-import fs from "fs/promises";
-import os from "os";
-import path from "path";
+import { config } from "../../config.js";
 
-import { execFile } from "./utils.js";
+function multiagentPublicKeyUrl() {
+  return new URL("/publickey", config.multiagentContainerUrl ?? "http://multiagent-container");
+}
 
 export async function getPublicKey() {
-  const sshDir = path.join(os.homedir(), ".ssh");
-  const keyPath = path.join(sshDir, "id_ed25519");
-  const pubKeyPath = path.join(sshDir, "id_ed25519.pub");
-
-  try {
-    const publicKey = await fs.readFile(pubKeyPath, "utf-8");
-    if (publicKey) {
-      return publicKey;
-    }
-  } catch (err: any) {
-    if (err?.code !== "ENOENT") {
-      throw err;
-    }
-    console.error("SSH key not found, generating new keys...");
+  const response = await fetch(multiagentPublicKeyUrl());
+  if (!response.ok) {
+    throw new Error(`multiagent-container returned ${response.status} while loading public key`);
   }
 
-  // If we couldn't read the keys, generate a new pair
-  await fs.mkdir(sshDir, { recursive: true });
-  await Promise.all([
-    fs.rm(keyPath), fs.rm(pubKeyPath)
-  ]).catch(() => null); // Ignore errors if files don't exist
+  const body = await response.json();
+  if (!body || typeof body.key !== "string") {
+    throw new Error("multiagent-container returned an invalid public key response");
+  }
 
-  await execFile("ssh-keygen", ["-t", "ed25519", "-f", keyPath, "-C", "trello-agent", "-N", ""]);
-
-  const publicKey = await fs.readFile(pubKeyPath, "utf-8");
-  return publicKey;
+  return body.key;
 }
