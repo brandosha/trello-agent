@@ -6,10 +6,11 @@ import { eq } from "drizzle-orm";
 import { WebSocket } from "ws";
 
 import { config } from "../../config.js";
+import { generateAuthToken } from "./auth.js";
+import { getMcpInternalUrl, MCP_AGENT_ID_HEADER } from "./mcp-http.js";
 import { threadsDir } from "./paths.js";
 import { HistorySub, PubSub } from "./PubSub.js";
 import { db, threadsTable } from "./database.js";
-import { createMcpBearerToken, getMcpInternalUrl, MCP_AGENT_ID_HEADER } from "./mcp-auth.js";
 
 interface PromptEvent {
   type: "input.prompt";
@@ -266,7 +267,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
   }
 
   private async configureTrelloMcp(from: string) {
-    const token = await createMcpBearerToken(this.id);
+    const token = await generateAuthToken({ agentId: this.id }, "1y");
     const message = {
       type: "config",
       from,
@@ -276,7 +277,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
             mcp_servers: {
               trello_agent: {
                 url: getMcpInternalUrl(),
-                headers: {
+                http_headers: {
                   Authorization: `Bearer ${token}`,
                   [MCP_AGENT_ID_HEADER]: this.id,
                 },

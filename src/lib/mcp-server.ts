@@ -6,12 +6,9 @@ import { z } from "zod";
 
 import { configDir } from "./paths.js";
 import { makeTrelloApiRequest } from "./trello.js";
-import { addDetachedGitWorktree } from "./workspaces.js";
 
 interface TrelloMcpServerOptions {
   resolveAgentId: (ctx: ServerContext) => Promise<string | undefined> | string | undefined;
-  resolveWorkingDirectory?: (ctx: ServerContext) => Promise<string> | string;
-  enableGitClone?: boolean;
 }
 
 function createServer() {
@@ -102,44 +99,6 @@ export function createTrelloMcpServer(options: TrelloMcpServerOptions) {
     }
   });
 
-  if (options.enableGitClone) {
-    server.registerTool("git_clone", {
-      description: "Tool for cloning a git repository. Must clone from an ssh URL and the destination must be a relative path within the current working directory.",
-      inputSchema: z.object({
-        gitRepo: z.string(),
-        branch: z.string(),
-        destination: z.string(),
-      }),
-    }, async (input, ctx) => {
-      if (!options.resolveWorkingDirectory) {
-        return textResult("git_clone is not available for this MCP transport", true);
-      }
-
-      if (!input.gitRepo.startsWith("git@")) {
-        return textResult("Invalid git repository URL. Only SSH URLs starting with git@ are supported.", true);
-      }
-
-      const workingDir = await options.resolveWorkingDirectory(ctx);
-      const destinationPath = path.resolve(workingDir, input.destination);
-      const relativeDestination = path.relative(workingDir, destinationPath);
-      if (relativeDestination.startsWith("..") || path.isAbsolute(relativeDestination)) {
-        return textResult("Invalid destination path", true);
-      }
-
-      try {
-        await addDetachedGitWorktree({
-          location: destinationPath,
-          repo: input.gitRepo,
-          branch: input.branch,
-        });
-      } catch (error) {
-        return textResult(`Failed to clone repository\nError: ${error}`, true);
-      }
-
-      return textResult(`Repository cloned to ${destinationPath}`);
-    });
-  }
-
   server.registerResource("workspace_setup_instructions",
     "trello-agent://workspace_setup_instructions.json",
     {
@@ -148,13 +107,10 @@ export function createTrelloMcpServer(options: TrelloMcpServerOptions) {
     },
     async (uri) => {
       const instructions = await getSetupInstructions();
-      const cloneInstruction = options.enableGitClone
-        ? "If you need to clone a repository, do not use `git clone` directly. Always use the `git_clone` tool. If the clone fails due to authentication issues, do not attempt to find a workaround, instead report the blocker immediately."
-        : "If you need to clone a repository, use the sandbox-provided `git_clone` tool rather than the Trello MCP server; repository work must happen inside the sandbox workspace.";
 
       instructions.__SYSTEM_INSTRUCTIONS__ = [
         "Never assume. If you are unsure how to set up your workspace, ask. Then use the `set_workspace_setup_instructions` tool to write the instructions you receive for future reference. Unless otherwise specified, setup instructions are specific to the Trello board that the thread is associated with.",
-        cloneInstruction,
+        "If you need to clone a repository, do not use `git clone` directly. Always use the `git_clone` tool. If the clone fails due to authentication issues, do not attempt to find a workaround, instead report the blocker immediately.",
         "Once a repository is cloned, immediately read the instructions in TRELLO_AGENT.md, AGENTS.md and similar documentation within the repository and commit to follow them.",
       ].join("\n");
 

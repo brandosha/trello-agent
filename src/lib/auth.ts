@@ -2,10 +2,6 @@ import { SignJWT, jwtVerify, generateSecret, JWTPayload, exportJWK, importJWK } 
 
 import { getConfigValue, setConfigValue } from "./database.js";
 
-interface AuthPayload extends JWTPayload {
-  username: string;
-}
-
 const JWT_ALG = "HS256";
 
 const symmetricKey = (async () => {
@@ -23,7 +19,7 @@ const symmetricKey = (async () => {
   }
 })();
 
-export async function generateAuthToken(payload: AuthPayload, expiresIn: string = "2w") {
+export async function generateAuthToken<T extends JWTPayload>(payload: T, expiresIn: string = "2w") {
   const privateKey = await symmetricKey;
 
   const alg = JWT_ALG;
@@ -35,7 +31,7 @@ export async function generateAuthToken(payload: AuthPayload, expiresIn: string 
   return jwt;
 }
 
-export async function verifyAuthToken(token: string) {
+export async function verifyAuthToken(token: string): Promise<JWTPayload> {
   const privateKey = await symmetricKey;
   const jwt = await jwtVerify(token, privateKey);
   return jwt.payload;
