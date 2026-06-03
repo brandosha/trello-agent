@@ -47,6 +47,4 @@ default) without publishing it to the host.
 Each sandboxed thread receives a per-thread MCP config update before prompts.
 The config includes a JWT bearer token and `X-Agent-ID` header for that
 thread's string ID. trello-agent rejects MCP requests unless the JWT agent ID
-matches the `X-Agent-ID` header and the string thread ID exists locally. If
-`config.mcpJwtSecret` is not set, trello-agent generates a secret and persists
-it in the app database.
+matches the `X-Agent-ID` header.
