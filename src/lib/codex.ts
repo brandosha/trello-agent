@@ -170,7 +170,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
 
     const message = assertStringPrompt(prompt);
     await this.connect();
-    await this.configureTrelloMcp(from);
+    await this.sendConfig(from);
     this.send({ type: "prompt", from, message });
     return { turnId: "", events: [] };
   }
@@ -266,7 +266,7 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
     this._ws.send(JSON.stringify(message));
   }
 
-  private async configureTrelloMcp(from: string) {
+  private async sendConfig(from: string) {
     const token = await generateAuthToken({ agentId: this.id }, "1y");
     const message = {
       type: "config",
@@ -285,6 +285,9 @@ export class SharedThread extends PubSub<SharedThreadEvent> {
             },
           },
         },
+        git: {
+          username: "Trello Agent",
+        }
       },
     };
     const messageJson = JSON.stringify(message);

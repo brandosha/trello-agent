@@ -5,12 +5,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/server";
 import { createTrelloMcpServer } from "./lib/mcp-server.js";
 
 const server = createTrelloMcpServer({
-  enableGitClone: true,
   resolveAgentId: async () => {
     const workingDir = await getWorkingDirectory();
     return path.basename(path.join(workingDir, ".."));
-  },
-  resolveWorkingDirectory: getWorkingDirectory,
+  }
 });
 
 async function getWorkingDirectory() {
